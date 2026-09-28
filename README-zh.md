@@ -90,6 +90,8 @@ https://github.com/user-attachments/assets/f4a2f1be-6615-4330-aea1-b86ccf42045e
 
 ## 🚀 快速开始
 
+基于本仓库搭建个人自学平台，可先阅读[本地启动说明](guides/personal-learning-setup.zh-CN.md)；学习空间入口为 `/learn`。
+
 ### 环境要求
 
 - **Node.js** >= 22.19

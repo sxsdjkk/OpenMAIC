@@ -27,6 +27,7 @@ import {
   X,
   Presentation,
   Loader2,
+  BookOpen,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { LanguageSwitcher } from '@/components/language-switcher';
@@ -124,7 +125,7 @@ const initialFormState: FormState = {
 };
 
 function HomePage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { theme, setTheme } = useTheme();
   const router = useRouter();
   // Do not replay the classic hero's entrance after the route handoff already
@@ -718,6 +719,17 @@ function HomePage() {
         ref={toolbarRef}
         className="fixed top-4 right-4 z-50 flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md px-2 py-1.5 rounded-full border border-gray-100/50 dark:border-gray-700/50 shadow-sm"
       >
+        <button
+          type="button"
+          onClick={() => router.push('/learn')}
+          className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-white hover:text-foreground dark:hover:bg-gray-700"
+        >
+          <BookOpen className="size-4" />
+          {locale.startsWith('zh') ? '学习空间' : 'My learning'}
+        </button>
+
+        <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
+
         {/* Language Selector */}
         <LanguageSwitcher onOpen={() => setThemeOpen(false)} />
 

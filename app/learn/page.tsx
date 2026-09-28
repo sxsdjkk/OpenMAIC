@@ -31,7 +31,8 @@ const copy = {
     back: 'Back to course creation',
     eyebrow: 'Personal learning space',
     title: 'Keep learning',
-    description: 'Turn a topic or your materials into an interactive class, and pick up where you left off.',
+    description:
+      'Turn a topic or your materials into an interactive class, and pick up where you left off.',
     courses: 'My courses',
     pages: 'Classroom pages',
     latest: 'Latest course',
@@ -88,23 +89,35 @@ export default function LearnPage() {
   return (
     <main className="min-h-[100dvh] bg-gradient-to-b from-slate-50 to-slate-100 px-5 py-10 text-slate-900 dark:from-slate-950 dark:to-slate-900 dark:text-slate-100 md:px-10">
       <div className="mx-auto max-w-5xl">
-        <Link href="/" className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white"
+        >
           <ArrowLeft className="size-4" /> {text.back}
         </Link>
 
         <div className="mt-14 flex flex-wrap items-end justify-between gap-6">
           <div>
-            <p className="text-sm font-medium text-violet-600 dark:text-violet-400">{text.eyebrow}</p>
+            <p className="text-sm font-medium text-violet-600 dark:text-violet-400">
+              {text.eyebrow}
+            </p>
             <h1 className="mt-2 text-4xl font-semibold tracking-tight">{text.title}</h1>
-            <p className="mt-3 max-w-2xl text-sm text-slate-500 dark:text-slate-400">{text.description}</p>
+            <p className="mt-3 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
+              {text.description}
+            </p>
           </div>
-          <Link href="/" className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-violet-700">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-violet-700"
+          >
             <Plus className="size-4" /> {text.create}
           </Link>
         </div>
 
         {failed ? (
-          <p role="alert" className="mt-12 text-sm text-red-600">{text.retry}</p>
+          <p role="alert" className="mt-12 text-sm text-red-600">
+            {text.retry}
+          </p>
         ) : courses === null ? (
           <p className="mt-12 text-sm text-slate-500">{text.loading}</p>
         ) : courses.length === 0 ? (
@@ -136,9 +149,18 @@ export default function LearnPage() {
               <section className="mt-8 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 p-7 text-white">
                 <p className="text-xs font-medium text-violet-100">{text.latest}</p>
                 <h2 className="mt-2 text-2xl font-semibold">{latest.name}</h2>
-                {latest.description && <p className="mt-2 line-clamp-2 text-sm text-violet-100">{latest.description}</p>}
-                {position && <p className="mt-4 text-sm text-violet-100">{text.page(position.scene, position.total)}</p>}
-                <Link href={`/classroom/${encodeURIComponent(latest.id)}`} className="mt-6 inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50">
+                {latest.description && (
+                  <p className="mt-2 line-clamp-2 text-sm text-violet-100">{latest.description}</p>
+                )}
+                {position && (
+                  <p className="mt-4 text-sm text-violet-100">
+                    {text.page(position.scene, position.total)}
+                  </p>
+                )}
+                <Link
+                  href={`/classroom/${encodeURIComponent(latest.id)}`}
+                  className="mt-6 inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50"
+                >
                   {text.continue} <ArrowRight className="size-4" />
                 </Link>
               </section>
@@ -148,15 +170,25 @@ export default function LearnPage() {
               <h2 className="text-xl font-semibold">{text.library}</h2>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 {courses.map((course) => (
-                  <Link key={course.id} href={`/classroom/${encodeURIComponent(course.id)}`} className="group rounded-xl border border-slate-200 bg-white/80 p-5 hover:border-violet-300 hover:shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:hover:border-violet-700">
+                  <Link
+                    key={course.id}
+                    href={`/classroom/${encodeURIComponent(course.id)}`}
+                    className="group rounded-xl border border-slate-200 bg-white/80 p-5 hover:border-violet-300 hover:shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:hover:border-violet-700"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h3 className="truncate font-medium">{course.name}</h3>
-                        {course.description && <p className="mt-1 line-clamp-2 text-sm text-slate-500">{course.description}</p>}
+                        {course.description && (
+                          <p className="mt-1 line-clamp-2 text-sm text-slate-500">
+                            {course.description}
+                          </p>
+                        )}
                       </div>
                       <ArrowRight className="size-4 shrink-0 text-slate-400 group-hover:text-violet-600" />
                     </div>
-                    <p className="mt-4 text-xs text-slate-500">{text.pageCount(course.sceneCount)}</p>
+                    <p className="mt-4 text-xs text-slate-500">
+                      {text.pageCount(course.sceneCount)}
+                    </p>
                   </Link>
                 ))}
               </div>

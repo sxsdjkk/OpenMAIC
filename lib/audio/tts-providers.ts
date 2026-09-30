@@ -375,13 +375,12 @@ async function generateOpenAITTS(
         ? TTS_PROVIDERS['openrouter-tts'].defaultModelId
         : config.modelId || TTS_PROVIDERS['openai-tts'].defaultModelId,
       input: text,
-      // Persisted Fish voices are incompatible with the replacement Flux model.
-      voice: isOpenRouter
-        ? TTS_PROVIDERS['openrouter-tts'].voices.some((voice) => voice.id === config.voice)
-          ? config.voice
-          : DEFAULT_TTS_VOICES['openrouter-tts']
-        : config.voice,
-      ...(!isOpenRouter ? { speed: config.speed || 1.0 } : {}),
+      // A persisted Flux selection is incompatible with the restored Fish model.
+      voice:
+        isOpenRouter && config.voice.startsWith('flux-')
+          ? DEFAULT_TTS_VOICES['openrouter-tts']
+          : config.voice,
+      speed: config.speed || 1.0,
       // OpenRouter defaults to raw PCM; the browser expects a decodable MP3.
       ...(isOpenRouter ? { response_format: 'mp3' } : {}),
     }),

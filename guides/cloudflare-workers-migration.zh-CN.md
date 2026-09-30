@@ -130,3 +130,30 @@ Workers 类型由 Wrangler 生成，`workers/generator-env.d.ts` 导出必要类
 线上只读复核三个 `TTS_OPENROUTER_MODELS` 均为新模型；已发布 JS 中模型及默认音色正确，服务端 TTS 提供商仍配置有效，旧课堂 `tCt3H_dDVP` 可正常读取。已有课程音频不重生成，先前失败任务不自动续跑。
 
 直接调用新模型及平台 Queue TTS 测试仍返回 HTTP 429：`free-models-per-day` / `RATE_LIMITED`，剩余额度为 0。免费日额度按账号共享，更换免费模型不能绕过。供应商返回重置时间为 **2026-09-30 17:00（America/Los_Angeles）**；没有新增付费模型、充值或升级 Cloudflare 套餐。配置切换验收通过，但**新模型实际音频合成验收仍被额度阻塞**，不能宣称新模型已成功出声。验收原始记录为 `/private/tmp/learning-flux-acceptance.json`、`/private/tmp/learning-flux-regression.json`，临时目录文件不是永久云端存档。[OpenRouter 限额说明](https://openrouter.ai/docs/api_reference/limits)
+
+## 恢复 Fish Audio 与原音色（2026-09-30）
+
+按用户要求恢复 `fish-audio/s2.1-pro-free:free`，同步本地 `.env.local`、示例配置、浏览器默认值与三个 Worker。恢复原音色目录、语言和排列，默认梓轩：
+
+| 音色 | Fish Audio ID |
+| --- | --- |
+| 梓轩 Zixuan（默认，zh-CN） | `5d29a99739c14d4ca3e4fe42193105b2` |
+| 语彤 Yutong（zh-CN） | `74c6aba5cbf94a15bbdc547ffce5cb38` |
+| Haoran（zh-CN） | `d675c275d1d44e57b4ef3840c5a23209` |
+| Bingbing（zh-CN） | `e98fa6cdad6946bf8d9bb8f9cb8c2532` |
+| 承翰 Chenghan（zh-TW） | `1e85fd1e0d3e4cc2b79fbca800e7e3fe` |
+| 詩涵 Shihan（zh-TW） | `91ec588cf8ef443a9c0d5b21d0c1fa36` |
+
+服务端继续固定使用免费 Fish 模型，只将残留 `flux-*` 音色回退为梓轩，保留原 Fish 音色及自定义 ID；恢复合成速度参数，保持 MP3。已有课程与音频不重生成，失败长课不自动续跑，场景/语音独立 Queue 与进度动效保持不变。
+
+按 Wrangler 发布流程保留 Secret 与现有绑定，重新生成模块作用域的 Workers 类型。503 项回归、应用 TypeScript、ESLint、格式检查、Next/OpenNext 构建与三个 Worker dry-run 通过。`.open-next`、`.next/server`、`.next/static` 共 11383 个发布相关文件扫描，未发现 6 项本地服务/飞书密钥值；`.env.local` 已恢复且未纳入版本控制。没有新增资源、上传密钥或升级套餐，原有构建警告未扩展修复。
+
+最终线上版本：网页 `ba2f0e4f-af31-42fa-a088-80709e161d64`，生成器 `a23f8a7a-3ac0-4f4c-a01c-40e091a3033e`，私有兼容 Worker `005b3aeb-aeb6-400c-91ac-4ee7442efa2c`。只读检查三个模型绑定均为 Fish；服务端提供商有效、旧课堂 `tCt3H_dDVP` 返回 200、发布 JS 包含全部六个音色。浏览器真实页面显示 Fish 模型、默认梓轩和原六音色目录，未重置用户的其他设置。
+
+一次携带旧 Flux 模型/音色的线上 Queue TTS 测试返回 HTTP 429 / `RATE_LIMITED`，OpenRouter 额度接口仍为 `used=55, limit=50, remaining=0`。因此配置恢复验收通过，但**本轮新音频合成仍受供应商额度阻塞**；换回 Fish 不会重置账号共享免费额度。
+
+- `VERIFICATION_TOOL`: `mcp__cua_repl`，Codex 内置浏览器。
+- `VERIFICATION_REASON`: 按浏览器验证路由技能复用已有飞书登录会话，验证真实线上页面而非仅检查代码。
+- `VERIFICATION_TARGET`: 学习平台首页角色音色选择及旧课堂 `tCt3H_dDVP`。
+- `VERIFICATION_EVIDENCE`: `/private/tmp/learning-fish-restore-voices.png`、`/private/tmp/learning-fish-restore-acceptance.json`、`/private/tmp/learning-fish-restore-regression.json`。
+- `VERIFICATION_GAPS`: 本轮未得到新合成音频，不能宣称已成功出声；未自动恢复失败长课或再次执行长课负载测试。临时目录证据不是永久云端存档。

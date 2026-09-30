@@ -146,7 +146,7 @@ describe('generateAndStoreTTS — pinned narrator fallback (bound == global)', (
       ttsSpeed: 1,
     });
     // Everything enabled → the deterministic pick is the first enabled provider
-    // in canonical order: openrouter-tts / 'flux-haley-en'.
+    // in canonical order: openrouter-tts / Fish Zixuan.
     mocks.isTTSProviderEnabled.mockReturnValue(true);
     mocks.pickNarratorAgent.mockReturnValue({
       id: 'teacher-pinned',
@@ -179,7 +179,7 @@ describe('generateAndStoreTTS — pinned narrator fallback (bound == global)', (
     });
     expect(secondBody).toMatchObject({
       ttsProviderId: 'openrouter-tts',
-      ttsVoice: 'flux-haley-en',
+      ttsVoice: '5d29a99739c14d4ca3e4fe42193105b2',
     });
     expect(mocks.toastWarning).toHaveBeenCalledOnce();
   });

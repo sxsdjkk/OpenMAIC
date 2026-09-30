@@ -146,7 +146,7 @@ describe('generateAndStoreTTS — pinned narrator fallback (bound == global)', (
       ttsSpeed: 1,
     });
     // Everything enabled → the deterministic pick is the first enabled provider
-    // in canonical order: openai-tts / 'marin'.
+    // in canonical order: openrouter-tts / 'flux-haley-en'.
     mocks.isTTSProviderEnabled.mockReturnValue(true);
     mocks.pickNarratorAgent.mockReturnValue({
       id: 'teacher-pinned',
@@ -177,7 +177,10 @@ describe('generateAndStoreTTS — pinned narrator fallback (bound == global)', (
       ttsVoice: 'clone-ghost',
       ttsModelId: QWEN_TTS_VOICE_CLONE_MODEL,
     });
-    expect(secondBody).toMatchObject({ ttsVoice: 'marin' });
+    expect(secondBody).toMatchObject({
+      ttsProviderId: 'openrouter-tts',
+      ttsVoice: 'flux-haley-en',
+    });
     expect(mocks.toastWarning).toHaveBeenCalledOnce();
   });
 

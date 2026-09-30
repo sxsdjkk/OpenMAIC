@@ -94,7 +94,12 @@
 
 import type { TTSModelConfig } from './types';
 import { isCustomTTSProvider } from './types';
-import { isQwenCloneVoice, resolveTTSModelForVoice, TTS_PROVIDERS } from './constants';
+import {
+  DEFAULT_TTS_VOICES,
+  isQwenCloneVoice,
+  resolveTTSModelForVoice,
+  TTS_PROVIDERS,
+} from './constants';
 import { downloadAudio, QwenVoiceCloneError, synthesizeQwenVoiceClone } from './qwen-voice-clone';
 import { evictQwenVoiceRegistrationMemo } from './qwen-voice-clone-registration';
 import { splitConcatenatedJsonObjects } from './json-stream';
@@ -370,8 +375,13 @@ async function generateOpenAITTS(
         ? TTS_PROVIDERS['openrouter-tts'].defaultModelId
         : config.modelId || TTS_PROVIDERS['openai-tts'].defaultModelId,
       input: text,
-      voice: config.voice,
-      speed: config.speed || 1.0,
+      // Persisted Fish voices are incompatible with the replacement Flux model.
+      voice: isOpenRouter
+        ? TTS_PROVIDERS['openrouter-tts'].voices.some((voice) => voice.id === config.voice)
+          ? config.voice
+          : DEFAULT_TTS_VOICES['openrouter-tts']
+        : config.voice,
+      ...(!isOpenRouter ? { speed: config.speed || 1.0 } : {}),
       // OpenRouter defaults to raw PCM; the browser expects a decodable MP3.
       ...(isOpenRouter ? { response_format: 'mp3' } : {}),
     }),

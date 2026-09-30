@@ -114,3 +114,19 @@ Workers 类型由 Wrangler 生成，`workers/generator-env.d.ts` 导出必要类
 本次总任务持续约 34.8 分钟，但已拆为独立消息；生成器观测最大单次墙钟约 189.09 秒、CPU 59.66ms、内存 38.34MiB，没有再次触发 Cloudflare 墙钟或资源限制。最终网页版本观测最大 CPU 7.954ms、内存 2.91MiB。网页指标存在采样，不是所有请求的严格上界，也未验证高并发。无需为本次观察到的负载升级 Cloudflare 套餐；当前阻塞是语音供应商额度。
 
 另建 1 节、关闭语音的补测课程，36.089 秒完成生成、发布和 R2 读取，浏览器成功渲染：[为什么要保存学习进度](https://ai-learning-agent.sxsdjkk.workers.dev/worker-classroom?id=2zwu1IJd4g)。动效已实测条纹移动时百分比保持真实值，失败时停止动效与轮询。详细任务、版本、指标和未覆盖范围见 [独立 Queue 任务验收记录](cloudflare-queue-acceptance.zh-CN.md)。
+
+## OpenRouter 免费语音模型切换（2026-09-30）
+
+按用户指定将模型切为 `deepgram/flux-tts:free`，同步 `.env.local`、示例配置、三个 Worker 的环境配置与浏览器默认模型。默认音色为 `flux-haley-en`，另提供 Heather、Priya、Jack、Bruce、Rufus。原 Fish 音色 ID 与新模型不兼容，服务端收到残留 Fish 选择时使用 Flux 默认音色；不传送未确认支持的合成速度参数，仍请求 MP3，并保持课程原始文字不变。[OpenRouter 模型页](https://openrouter.ai/deepgram/flux-tts:free)标注为英语合成，**未确认中文朗读质量或支持能力**。
+
+按 Wrangler 技能的发布流程保留现有 Secret、重新生成模块作用域的 Workers 类型并验证部署。503 项语音/课堂回归通过，应用 TypeScript、ESLint、格式检查、Next/OpenNext 构建、三个 Worker dry-run 通过。本次 `.open-next`、`.next/server`、`.next/static` 共 11209 个发布相关文件扫描，未发现 6 项本地服务/飞书密钥值；`.env.local` 已恢复。更宽扫描中的旧本地开发缓存含配置值，不在部署目录，本轮未删除缓存或轮换密钥。原有 OpenNext 依赖复制诊断与重复 `tier` 字段警告未扩展修复。
+
+最终线上版本：
+
+- 网页：`9c702536-9cf3-4e1d-bf3c-6fe67852faa5`。
+- 生成器：`97644399-8298-4b44-92de-28ceb302136b`。
+- 私有兼容 Worker：`88176aa9-27a5-4163-911a-d9bfa264bcf1`。
+
+线上只读复核三个 `TTS_OPENROUTER_MODELS` 均为新模型；已发布 JS 中模型及默认音色正确，服务端 TTS 提供商仍配置有效，旧课堂 `tCt3H_dDVP` 可正常读取。已有课程音频不重生成，先前失败任务不自动续跑。
+
+直接调用新模型及平台 Queue TTS 测试仍返回 HTTP 429：`free-models-per-day` / `RATE_LIMITED`，剩余额度为 0。免费日额度按账号共享，更换免费模型不能绕过。供应商返回重置时间为 **2026-09-30 17:00（America/Los_Angeles）**；没有新增付费模型、充值或升级 Cloudflare 套餐。配置切换验收通过，但**新模型实际音频合成验收仍被额度阻塞**，不能宣称新模型已成功出声。验收原始记录为 `/private/tmp/learning-flux-acceptance.json`、`/private/tmp/learning-flux-regression.json`，临时目录文件不是永久云端存档。[OpenRouter 限额说明](https://openrouter.ai/docs/api_reference/limits)

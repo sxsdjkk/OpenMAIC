@@ -25,7 +25,7 @@ corepack pnpm run build:workers
 ## 线上验收状态（2026-09-30）
 
 1. 飞书真实登录已通过：授权页不再返回 20029，完成现有权限重新授权后成功返回首页；进入 `/learn` 并刷新后仍可访问。
-2. 网页 Worker 已配置三项飞书 Secret。两个 Worker 均已配置 `OPENAI_API_KEY`、`OPENROUTER_API_KEY` 和 `TTS_OPENROUTER_API_KEY`。本地独立 TTS 密钥验证返回 401，因此线上 TTS 使用已验证有效的本地 OpenRouter 通用密钥。非敏感 URL、模型和开关存于 Wrangler `vars`；密钥通过标准输入上传为 Secret，没有写入配置或部署包。对 2046 个构建文件扫描，未发现本地密钥值。
+2. 网页 Worker 已配置三项飞书 Secret。两个 Worker 均已配置 `OPENAI_API_KEY`、`OPENROUTER_API_KEY` 和 `TTS_OPENROUTER_API_KEY`。早期直接读取本地 TTS 配置时未展开环境变量引用，测试返回 401；本轮已核对 `TTS_OPENROUTER_API_KEY` 引用 `OPENROUTER_API_KEY`，线上 TTS 同步的是后者已验证有效的实际值。非敏感 URL、模型和开关存于 Wrangler `vars`；密钥通过标准输入上传为 Secret，没有写入配置或部署包。对 2046 个构建文件扫描，未发现本地密钥值。
 3. 文本建课默认使用 `openai:deepseek-flash`（服务端点为 DeepSeek）。验收任务 `2joR4OeNI6` 经 Queue 执行并完成，结果为课堂 `p-oigbMUl6`，1 个场景，TTS 覆盖 `5/5`。独立 TTS API 也返回 HTTP 200 和有效 MP3。课堂及全部音频写入 R2；抽查音频返回 `audio/mpeg`，MP3 可被 ffprobe 解析，Range `bytes=0-31` 返回 206 和正确的 32 字节内容。浏览器已加载并播放该课堂，当前浏览器的课程语音开关已开启。
 4. 提示词作为 53 个 Text 模块加入部署包，Workers 从 `/bundle` 读取。本地 workerd 实测普通、PBL 和应用提示词均可读取。语音传输在 Workers 使用原生 fetch；DNS 校验使用 resolve4/resolve6，保留私网、元数据及重定向检查。184 项相关回归测试、Next/OpenNext 构建和两个 Worker 的 dry-run 均通过。
 5. 之前把免费 HTTP 请求的 10ms CPU 限制套用于 Queue 消费者，判断不准确。[当前 Queues 官方文档](https://developers.cloudflare.com/queues/platform/limits/)说明免费与付费方案均适用消费者限制，默认 CPU 时间为 30 秒，墙钟时间最长 15 分钟。本次短课任务执行成功且日志 outcome 为 ok；尚未做长课或高并发压力测试。

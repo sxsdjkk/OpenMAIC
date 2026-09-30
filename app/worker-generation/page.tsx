@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { LoaderCircle, Check, AlertCircle } from 'lucide-react';
+import Link from 'next/link';
 import styles from './progress.module.css';
 
 const steps = [
@@ -132,9 +133,13 @@ export default function WorkerGenerationPage() {
           百分比根据已完成的任务更新。等待模型响应时，动效表示任务仍在进行。
         </p>
       </div>
-      <a className="mt-6 inline-block text-sm text-violet-600 hover:underline" href="/">
+      <Link
+        className="mt-6 inline-block text-sm text-violet-600 hover:underline"
+        href="/"
+        prefetch={false}
+      >
         返回学习平台
-      </a>
+      </Link>
     </main>
   );
 }

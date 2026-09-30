@@ -70,7 +70,12 @@ describe('Feishu login', () => {
       headers: { Cookie: sessionValue },
     });
     expect((await getFeishuSession(request))?.sub).toBe('ou_test');
-    const tampered = sessionValue.slice(0, -1) + (sessionValue.endsWith('x') ? 'y' : 'x');
+    // The last base64url character has unused bits; change a significant byte.
+    const signatureStart = sessionValue.lastIndexOf('.') + 1;
+    const tampered =
+      sessionValue.slice(0, signatureStart) +
+      (sessionValue[signatureStart] === 'A' ? 'B' : 'A') +
+      sessionValue.slice(signatureStart + 1);
     expect(
       await getFeishuSession(new Request(request.url, { headers: { Cookie: tampered } })),
     ).toBeNull();

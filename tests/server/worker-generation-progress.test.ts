@@ -62,17 +62,15 @@ describe('generation progress animation and real counts', () => {
   });
 
   it('transitions to the TTS phase and updates persisted clip counts', async () => {
-    fetchJob
-      .mockResolvedValueOnce(job())
-      .mockResolvedValueOnce(
-        job({
-          progress: 86,
-          step: 'generating_tts',
-          scenesGenerated: 12,
-          ttsGenerated: 24,
-          totalTts: 48,
-        }),
-      );
+    fetchJob.mockResolvedValueOnce(job()).mockResolvedValueOnce(
+      job({
+        progress: 86,
+        step: 'generating_tts',
+        scenesGenerated: 12,
+        ttsGenerated: 24,
+        totalTts: 48,
+      }),
+    );
     await render();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);

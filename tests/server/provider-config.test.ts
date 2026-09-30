@@ -29,6 +29,7 @@ const ENV_PREFIXES_TO_CLEAR = [
   'OLLAMA',
   'BEDROCK',
   'TTS_OPENAI',
+  'TTS_OPENROUTER',
   'TTS_AZURE',
   'TTS_GLM',
   'TTS_QWEN',
@@ -754,6 +755,20 @@ video:
       vi.stubEnv('TTS_OPENAI_API_KEY', 'sk-tts');
       const { getServerTTSProviders } = await import('@/lib/server/provider-config');
       expect(getServerTTSProviders()['openai-tts']).toEqual({});
+    });
+
+    it('resolves the pinned free Fish Audio model through OpenRouter', async () => {
+      vi.stubEnv('TTS_OPENROUTER_API_KEY', 'sk-test');
+      vi.stubEnv('TTS_OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1');
+      vi.stubEnv('TTS_OPENROUTER_MODELS', 'fish-audio/s2.1-pro-free:free');
+      const { getServerTTSProviders, resolveTTSApiKey, resolveTTSBaseUrl, resolveTTSModel } =
+        await import('@/lib/server/provider-config');
+      expect(getServerTTSProviders()['openrouter-tts']).toEqual({});
+      expect(resolveTTSApiKey('openrouter-tts')).toBe('sk-test');
+      expect(resolveTTSBaseUrl('openrouter-tts')).toBe('https://openrouter.ai/api/v1');
+      expect(resolveTTSModel('openrouter-tts', 'fish-audio/s2.1-pro')).toBe(
+        'fish-audio/s2.1-pro-free:free',
+      );
     });
 
     it('force-disables a provider via TTS_<P>_ENABLED=false even when it has a key', async () => {

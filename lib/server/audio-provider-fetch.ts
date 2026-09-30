@@ -52,6 +52,8 @@ import { createValidatedDispatcher } from '@/lib/server/pinned-dispatcher';
 import {
   allowLocalNetworksEnabled,
   findUnsafeNetworkTargetError,
+  UnsafeNetworkTargetError,
+  validateUrlForSSRFWithPolicy,
   type SsrfValidationPolicy,
 } from '@/lib/server/ssrf-guard';
 import {
@@ -172,26 +174,37 @@ export async function audioProviderFetch(
   init?: RequestInit,
   policy: AudioProviderFetchPolicy = {},
 ): Promise<Response> {
-  const allowLocalNetworks = resolveAllowLocalNetworks(policy.allowLocalNetworks);
-  const dispatcher = dispatcherFor(allowLocalNetworks);
+  const workers = process.env.CLOUDFLARE_WORKERS === '1';
+  const allowLocalNetworks = workers ? false : resolveAllowLocalNetworks(policy.allowLocalNetworks);
+  if (workers) {
+    const error = await validateUrlForSSRFWithPolicy(input.toString(), { allowLocalNetworks });
+    if (error) throw new UnsafeNetworkTargetError(error);
+    if (policy.requireHttps && new URL(input).protocol !== 'https:') {
+      throw new UnsafeNetworkTargetError('Provider target must use https');
+    }
+  }
+  // Workers provides the outbound transport; Node's pinned socket dispatcher
+  // relies on dns.lookup, which is unavailable in Workers.
+  const dispatcher = workers ? undefined : dispatcherFor(allowLocalNetworks);
+  const transport = workers ? fetch : undiciTransport;
   // Normalize the body once, before either transport path can serialize it:
   // both the direct `redirect: 'error'` request and the per-hop loop hand the
   // init to undici's fetch, whose serializer is the one that must recognize it.
-  const normalizedInit = normalizeProviderBodyForUndici(init);
+  const normalizedInit = workers ? init : normalizeProviderBodyForUndici(init);
   try {
     // Redirect-free mode: the caller owns the exact URL and its allowlist, so a
     // 3xx must stay a hard failure. Issue the request directly with the pinned
     // dispatcher and the caller's `redirect: 'error'`; never hand it to the
     // per-hop loop, which would follow the redirect.
     if (policy.rejectRedirects) {
-      return await undiciTransport(input, {
+      return await transport(input, {
         ...(normalizedInit ?? {}),
         redirect: 'error',
         dispatcher,
       } as RequestInit);
     }
     return await fetchWithRedirectValidation(input, normalizedInit, {
-      fetchImpl: undiciTransport,
+      fetchImpl: transport,
       dispatcher,
       allowLocalNetworks,
       ...(policy.requireHttps ? { requireHttps: true } : {}),

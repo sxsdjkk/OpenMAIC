@@ -2,9 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { isAgentRuntimeConfigured, isProWorkbenchEnabled } from '@/lib/config/feature-flags';
 import { verifyAccessTokenEdge } from '@/lib/server/access-token-edge';
+import {
+  getFeishuSession,
+  isFeishuAuthConfigured,
+  isFeishuAuthRequired,
+} from '@/lib/server/feishu-auth';
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (isFeishuAuthRequired() && !pathname.startsWith('/auth/')) {
+    if (!isFeishuAuthConfigured()) {
+      return new NextResponse('Feishu login is not configured', { status: 503 });
+    }
+    if (!(await getFeishuSession(request))) {
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json({ error: 'Feishu login required' }, { status: 401 });
+      }
+      return NextResponse.redirect(new URL('/auth/login', request.url));
+    }
+  }
 
   // Return an actual server-side 404 when either half of the workbench is off.
   // Edge middleware cannot reliably inspect server-only deployment variables,

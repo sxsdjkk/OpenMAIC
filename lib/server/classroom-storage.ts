@@ -1,9 +1,11 @@
 import { promises as fs } from 'fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'path';
 import { nanoid } from 'nanoid';
 import type { NextRequest } from 'next/server';
 import type { Scene, Stage } from '@/lib/types/stage';
 import { createLogger } from '@/lib/logger';
+import { sanitizeSceneContent } from '@/lib/server/sanitize-scene-content';
 
 const log = createLogger('ClassroomStorage');
 
@@ -57,20 +59,104 @@ async function ensureDir(dir: string) {
   await fs.mkdir(dir, { recursive: true });
 }
 
+const isCloudflareWorker = process.env.CLOUDFLARE_WORKERS === '1';
+export interface ClassroomBucket {
+  get(
+    key: string,
+    options?: { range?: { offset: number; length: number } },
+  ): Promise<{
+    text(): Promise<string>;
+    body: ReadableStream;
+    customMetadata?: Record<string, string>;
+  } | null>;
+  head(key: string): Promise<{ size: number } | null>;
+  put(
+    key: string,
+    value: string | Uint8Array,
+    options?: { onlyIf?: Headers; customMetadata?: Record<string, string> },
+  ): Promise<object | null>;
+  delete(key: string): Promise<void>;
+}
+
+const queueBucketContext = new AsyncLocalStorage<ClassroomBucket>();
+
+export function runWithClassroomBucket<T>(
+  bucket: ClassroomBucket,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return queueBucketContext.run(bucket, operation);
+}
+
+export async function getClassroomBucket(): Promise<ClassroomBucket> {
+  const queueBucket = queueBucketContext.getStore();
+  if (queueBucket) return queueBucket;
+  const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+  return (getCloudflareContext().env as CloudflareEnv & { CLASSROOM_BUCKET: ClassroomBucket })
+    .CLASSROOM_BUCKET;
+}
+
+function classroomObjectKey(filePath: string): string {
+  const classroomPath = path.relative(CLASSROOMS_DIR, filePath);
+  if (classroomPath && !classroomPath.startsWith('..') && !path.isAbsolute(classroomPath)) {
+    return `classrooms/${classroomPath.replaceAll(path.sep, '/')}`;
+  }
+  const jobPath = path.relative(CLASSROOM_JOBS_DIR, filePath);
+  if (jobPath && !jobPath.startsWith('..') && !path.isAbsolute(jobPath)) {
+    return `jobs/${jobPath.replaceAll(path.sep, '/')}`;
+  }
+  throw new Error('Classroom object path is outside storage directories');
+}
+
+export async function readClassroomJsonFile(filePath: string): Promise<string | null> {
+  if (isCloudflareWorker) {
+    const object = await (await getClassroomBucket()).get(classroomObjectKey(filePath));
+    return object ? object.text() : null;
+  }
+  try {
+    return await fs.readFile(filePath, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+export async function writeClassroomMedia(
+  classroomId: string,
+  subdir: 'media' | 'audio',
+  filename: string,
+  bytes: Uint8Array,
+): Promise<void> {
+  if (isCloudflareWorker) {
+    await (
+      await getClassroomBucket()
+    ).put(`classrooms/${classroomId}/${subdir}/${filename}`, bytes);
+    return;
+  }
+  const dir = path.join(CLASSROOMS_DIR, classroomId, subdir);
+  await ensureDir(dir);
+  await fs.writeFile(path.join(dir, filename), bytes);
+}
+
 export async function ensureClassroomsDir() {
+  if (isCloudflareWorker) return;
   await ensureDir(CLASSROOMS_DIR);
 }
 
 export async function ensureClassroomJobsDir() {
+  if (isCloudflareWorker) return;
   await ensureDir(CLASSROOM_JOBS_DIR);
 }
 
 export async function writeJsonFileAtomic(filePath: string, data: unknown) {
+  const content = JSON.stringify(data, null, 2);
+  if (isCloudflareWorker) {
+    await (await getClassroomBucket()).put(classroomObjectKey(filePath), content);
+    return;
+  }
   const dir = path.dirname(filePath);
   await ensureDir(dir);
 
   const tempFilePath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  const content = JSON.stringify(data, null, 2);
   await fs.writeFile(tempFilePath, content, 'utf-8');
   await fs.rename(tempFilePath, filePath);
 }
@@ -99,11 +185,20 @@ const LINK_UNSUPPORTED_CODES = new Set(['ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EPER
  * every path. A collision surfaces as a {@link ClassroomAlreadyExistsError}.
  */
 export async function writeJsonFileExclusive(filePath: string, data: unknown): Promise<void> {
+  const content = JSON.stringify(data, null, 2);
+  if (isCloudflareWorker) {
+    const created = await (
+      await getClassroomBucket()
+    ).put(classroomObjectKey(filePath), content, {
+      onlyIf: new Headers({ 'If-None-Match': '*' }),
+    });
+    if (!created) throw new ClassroomAlreadyExistsError(path.basename(filePath, '.json'));
+    return;
+  }
   const dir = path.dirname(filePath);
   await ensureDir(dir);
 
   const tempFilePath = `${filePath}.${process.pid}.${Date.now()}.${nanoid(6)}.tmp`;
-  const content = JSON.stringify(data, null, 2);
   try {
     await fs.writeFile(tempFilePath, content, 'utf-8');
     try {
@@ -129,6 +224,7 @@ export async function writeJsonFileExclusive(filePath: string, data: unknown): P
 }
 
 export function buildRequestOrigin(req: NextRequest): string {
+  if (isCloudflareWorker) return req.nextUrl.origin;
   return req.headers.get('x-forwarded-host')
     ? `${req.headers.get('x-forwarded-proto') || 'http'}://${req.headers.get('x-forwarded-host')}`
     : req.nextUrl.origin;
@@ -170,19 +266,22 @@ export function resolveClassroomFilePath(id: string): string {
 
 export async function readClassroom(id: string): Promise<PersistedClassroomData | null> {
   const filePath = resolveClassroomFilePath(id);
-  try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(content) as PersistedClassroomData;
-    // A reservation is a placeholder, not a classroom: hide it so a reader that
-    // somehow learns the id before generation completes gets a 404 rather than
-    // an empty document.
-    return parsed.reserved ? null : parsed;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
+  const content = await readClassroomJsonFile(filePath);
+  if (!content) return null;
+  const parsed = JSON.parse(content) as PersistedClassroomData;
+  // A reservation is a placeholder, not a classroom.
+  return parsed.reserved ? null : parsed;
+}
+
+/** Prepare a sanitized, streamable response off the HTTP request's CPU budget. */
+export async function publishClassroomReadView(classroom: PersistedClassroomData): Promise<void> {
+  if (!isCloudflareWorker || classroom.reserved) return;
+  await (
+    await getClassroomBucket()
+  ).put(
+    `classrooms/${classroom.id}/published.json`,
+    JSON.stringify({ success: true, classroom: sanitizeSceneContent(classroom) }),
+  );
 }
 
 /**
@@ -215,12 +314,17 @@ export async function reserveClassroom(id: string, stage: Stage): Promise<void> 
 export async function releaseClassroomReservation(id: string): Promise<void> {
   const filePath = resolveClassroomFilePath(id);
   try {
-    const content = await fs.readFile(filePath, 'utf-8');
+    const content = await readClassroomJsonFile(filePath);
+    if (!content) return;
     const parsed = JSON.parse(content) as PersistedClassroomData;
     if (parsed.reserved !== true) {
       return;
     }
-    await fs.unlink(filePath);
+    if (isCloudflareWorker) {
+      await (await getClassroomBucket()).delete(classroomObjectKey(filePath));
+    } else {
+      await fs.unlink(filePath);
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return;
@@ -261,6 +365,8 @@ export async function persistClassroom(
   } else {
     await writeJsonFileAtomic(filePath, classroomData);
   }
+
+  await publishClassroomReadView(classroomData);
 
   return {
     ...classroomData,

@@ -1,5 +1,3 @@
-import { NextResponse } from 'next/server';
-
 export const API_ERROR_CODES = {
   MISSING_REQUIRED_FIELD: 'MISSING_REQUIRED_FIELD',
   MISSING_API_KEY: 'MISSING_API_KEY',
@@ -57,8 +55,8 @@ export function apiError(
   error: string,
   details?: string,
   reason?: string,
-): NextResponse<ApiErrorBody> {
-  return NextResponse.json(
+): Response {
+  return Response.json(
     {
       success: false as const,
       errorCode: code,
@@ -70,6 +68,6 @@ export function apiError(
   );
 }
 
-export function apiSuccess<T extends Record<string, unknown>>(data: T, status = 200): NextResponse {
-  return NextResponse.json({ success: true, ...data }, { status });
+export function apiSuccess<T extends Record<string, unknown>>(data: T, status = 200): Response {
+  return Response.json({ success: true, ...data }, { status });
 }

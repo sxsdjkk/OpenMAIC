@@ -1,11 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   buildRequestOrigin: vi.fn(),
   createClassroomGenerationJob: vi.fn(),
+  markClassroomGenerationJobFailed: vi.fn(),
   runClassroomGenerationJob: vi.fn(),
+  send: vi.fn(),
 }));
 
 vi.mock('next/server', async (importOriginal) => {
@@ -15,6 +17,11 @@ vi.mock('next/server', async (importOriginal) => {
 
 vi.mock('@/lib/server/classroom-job-store', () => ({
   createClassroomGenerationJob: mocks.createClassroomGenerationJob,
+  markClassroomGenerationJobFailed: mocks.markClassroomGenerationJobFailed,
+}));
+
+vi.mock('@opennextjs/cloudflare', () => ({
+  getCloudflareContext: () => ({ env: { CLASSROOM_QUEUE: { send: mocks.send } } }),
 }));
 
 vi.mock('@/lib/server/classroom-job-runner', () => ({
@@ -45,12 +52,17 @@ async function postGenerateClassroom(body: Record<string, unknown>) {
 }
 
 describe('POST /api/generate-classroom', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   beforeEach(() => {
     vi.resetModules();
+    vi.stubEnv('CLOUDFLARE_WORKERS', '');
     mocks.after.mockReset();
     mocks.buildRequestOrigin.mockReset();
     mocks.createClassroomGenerationJob.mockReset();
     mocks.runClassroomGenerationJob.mockReset();
+    mocks.markClassroomGenerationJobFailed.mockReset();
+    mocks.send.mockReset();
 
     mocks.buildRequestOrigin.mockReturnValue('http://localhost');
     mocks.createClassroomGenerationJob.mockResolvedValue({
@@ -120,5 +132,32 @@ describe('POST /api/generate-classroom', () => {
       }),
     );
     expect(mocks.after).toHaveBeenCalledTimes(1);
+  });
+
+  it('submits a text-only Workers job to the queue', async () => {
+    vi.stubEnv('CLOUDFLARE_WORKERS', '1');
+    mocks.send.mockResolvedValue(undefined);
+
+    const res = await postGenerateClassroom({ requirement: 'Learn fractions', enableTTS: true });
+
+    expect(res.status).toBe(202);
+    expect(mocks.send).toHaveBeenCalledWith({
+      jobId: expect.any(String),
+      input: expect.objectContaining({ requirement: 'Learn fractions', enableTTS: true }),
+      baseUrl: 'http://localhost',
+    });
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
+  it('rejects PDF and video generation on Workers before creating a job', async () => {
+    vi.stubEnv('CLOUDFLARE_WORKERS', '1');
+    expect(
+      (await postGenerateClassroom({ requirement: 'PDF', pdfContent: { text: 'x', images: [] } }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await postGenerateClassroom({ requirement: 'Video', enableVideoGeneration: true })).status,
+    ).toBe(400);
+    expect(mocks.createClassroomGenerationJob).not.toHaveBeenCalled();
   });
 });

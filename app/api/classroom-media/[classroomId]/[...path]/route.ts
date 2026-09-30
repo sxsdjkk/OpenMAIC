@@ -1,7 +1,11 @@
 import { promises as fs, createReadStream, type ReadStream } from 'fs';
 import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
-import { CLASSROOMS_DIR, isValidClassroomId } from '@/lib/server/classroom-storage';
+import {
+  CLASSROOMS_DIR,
+  getClassroomBucket,
+  isValidClassroomId,
+} from '@/lib/server/classroom-storage';
 import { parseRangeHeader } from '@/lib/server/http-range';
 import { createLogger } from '@/lib/logger';
 
@@ -58,6 +62,37 @@ export async function GET(
   const subDir = pathSegments[0];
   if (subDir !== 'media' && subDir !== 'audio') {
     return NextResponse.json({ error: 'Invalid path' }, { status: 404 });
+  }
+
+  if (process.env.CLOUDFLARE_WORKERS === '1') {
+    const bucket = await getClassroomBucket();
+    const key = `classrooms/${classroomId}/${joined}`;
+    const object = await bucket.head(key);
+    if (!object) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const range = parseRangeHeader(req.headers.get('range'), object.size);
+    if (range.kind === 'unsatisfiable') {
+      return new Response(null, {
+        status: 416,
+        headers: { 'Cache-Control': 'no-store', 'Content-Range': `bytes */${object.size}` },
+      });
+    }
+    const ranged = range.kind === 'range';
+    const body = await bucket.get(
+      key,
+      ranged ? { range: { offset: range.start, length: range.end - range.start + 1 } } : undefined,
+    );
+    if (!body) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    return new Response(body.body, {
+      status: ranged ? 206 : 200,
+      headers: {
+        ...CACHE_HEADERS,
+        'Content-Type':
+          MIME_TYPES[path.extname(joined).toLowerCase()] || 'application/octet-stream',
+        'Content-Length': String(ranged ? range.end - range.start + 1 : object.size),
+        'Accept-Ranges': 'bytes',
+        ...(ranged ? { 'Content-Range': `bytes ${range.start}-${range.end}/${object.size}` } : {}),
+      },
+    });
   }
 
   const filePath = path.join(CLASSROOMS_DIR, classroomId, ...pathSegments);

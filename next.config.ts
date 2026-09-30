@@ -1,38 +1,42 @@
 import type { NextConfig } from 'next';
 
 const isVercelBuild = Boolean(process.env.VERCEL);
+const isCloudflareBuild = process.env.CLOUDFLARE_WORKERS === '1';
 
 const nextConfig: NextConfig = {
   env: {
     // Pin even the unset/default value in both client and server bundles.
     // A runtime-only override must not disable the route the built client uses.
     NEXT_PUBLIC_PI_CHAT_ENABLED: process.env.NEXT_PUBLIC_PI_CHAT_ENABLED ?? '',
+    CLOUDFLARE_WORKERS: process.env.CLOUDFLARE_WORKERS ?? '',
   },
   output: process.env.VERCEL ? undefined : 'standalone',
-  outputFileTracingIncludes: {
-    '/*': [
-      'lib/server/agent-runtime/import-pptx-worker.mjs',
-      'skills/openmaic/**',
-      'skills/agent-runtime/**',
-      // Loaded through a runtime-only `import('undici')` (see the LLM
-      // dispatcher in lib/ai/providers.ts and the Google proxy transport), so
-      // the output tracer never sees it and standalone builds ship without it.
-      'node_modules/undici/**',
-      // sharp's native libvips libraries are loaded via dlopen and are not
-      // statically analyzable, so Next.js standalone tracing omits them. Two
-      // sharp versions resolve in the tree (0.34.5 transitive -> libvips
-      // 1.2.4, 0.35.4 direct -> libvips 1.3.3); tracing picked the wrong one
-      // and the runtime dlopen of sharp 0.35.4 failed with
-      // "libvips-cpp.so.8.18.6: No such file or directory" on self-hosted
-      // Docker (Alpine/musl) deployments. Force-include every sharp-libvips
-      // native lib dir for standalone builds. Vercel packages its runtime
-      // dependencies itself; including every native variant there bloats each
-      // traced function and can push Hobby deployments past 12 bundles.
-      ...(!isVercelBuild
-        ? ['node_modules/.pnpm/@img+sharp-libvips-*/node_modules/@img/sharp-libvips-*/lib/**']
-        : []),
-    ],
-  },
+  outputFileTracingIncludes: isCloudflareBuild
+    ? undefined
+    : {
+        '/*': [
+          'lib/server/agent-runtime/import-pptx-worker.mjs',
+          'skills/openmaic/**',
+          'skills/agent-runtime/**',
+          // Loaded through a runtime-only `import('undici')` (see the LLM
+          // dispatcher in lib/ai/providers.ts and the Google proxy transport), so
+          // the output tracer never sees it and standalone builds ship without it.
+          'node_modules/undici/**',
+          // sharp's native libvips libraries are loaded via dlopen and are not
+          // statically analyzable, so Next.js standalone tracing omits them. Two
+          // sharp versions resolve in the tree (0.34.5 transitive -> libvips
+          // 1.2.4, 0.35.4 direct -> libvips 1.3.3); tracing picked the wrong one
+          // and the runtime dlopen of sharp 0.35.4 failed with
+          // "libvips-cpp.so.8.18.6: No such file or directory" on self-hosted
+          // Docker (Alpine/musl) deployments. Force-include every sharp-libvips
+          // native lib dir for standalone builds. Vercel packages its runtime
+          // dependencies itself; including every native variant there bloats each
+          // traced function and can push Hobby deployments past 12 bundles.
+          ...(!isVercelBuild
+            ? ['node_modules/.pnpm/@img+sharp-libvips-*/node_modules/@img/sharp-libvips-*/lib/**']
+            : []),
+        ],
+      },
   typescript: {
     tsconfigPath: process.env.NODE_ENV === 'production' ? 'tsconfig.build.json' : 'tsconfig.json',
   },
@@ -58,6 +62,23 @@ const nextConfig: NextConfig = {
   ],
   experimental: {
     proxyClientMaxBodySize: '200mb',
+  },
+  webpack(config, { isServer, webpack }) {
+    if (isCloudflareBuild) {
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(
+          /(?:^|[\\/])instrumentation\.ts$/,
+          './instrumentation.cloudflare.ts',
+        ),
+      );
+    }
+    if (isCloudflareBuild && !isServer) {
+      // The storage package's shared entry also re-exports server-only PG
+      // modules. They are unused in the browser but webpack still resolves
+      // their node: imports before tree-shaking those exports away.
+      config.plugins.push(new webpack.IgnorePlugin({ resourceRegExp: /^node:/ }));
+    }
+    return config;
   },
   async headers() {
     const extraAncestors = process.env.ALLOWED_FRAME_ANCESTORS?.trim();

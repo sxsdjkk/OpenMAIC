@@ -7,7 +7,6 @@
  * POST /api/generate/tts
  */
 
-import { NextRequest } from 'next/server';
 import {
   generateTTS,
   QwenTTSError,
@@ -36,7 +35,7 @@ const log = createLogger('TTS API');
 
 export const maxDuration = 30;
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   let ttsProviderId: string | undefined;
   let ttsVoice: string | undefined;
   let audioId: string | undefined;

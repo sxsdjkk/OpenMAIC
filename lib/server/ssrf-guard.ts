@@ -196,7 +196,22 @@ function isOptInGovernedRange(value: string): boolean {
   return isPrivateIP(canonical) || ipaddr.parse(canonical).range() === 'carrierGradeNat';
 }
 
-/** dns.lookup bounded by a timer; resolves to null on timeout so the caller decides. */
+async function lookupAddresses(
+  hostname: string,
+): Promise<Array<{ address: string; family: number }>> {
+  if (process.env.CLOUDFLARE_WORKERS !== '1') {
+    return dns.lookup(hostname, { all: true, verbatim: true });
+  }
+  // Workers implements resolve4/resolve6 but not dns.lookup.
+  const answers = await Promise.allSettled([dns.resolve4(hostname), dns.resolve6(hostname)]);
+  return answers.flatMap((answer, index) =>
+    answer.status === 'fulfilled'
+      ? answer.value.map((address) => ({ address, family: index === 0 ? 4 : 6 }))
+      : [],
+  );
+}
+
+/** DNS lookup bounded by a timer; resolves to null on timeout so the caller decides. */
 async function lookupWithTimeout(
   hostname: string,
   timeoutMs: number,
@@ -206,7 +221,7 @@ async function lookupWithTimeout(
     timer = setTimeout(() => resolve(null), timeoutMs);
   });
   try {
-    return await Promise.race([dns.lookup(hostname, { all: true, verbatim: true }), timeout]);
+    return await Promise.race([lookupAddresses(hostname), timeout]);
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -544,7 +559,7 @@ export async function validateUrlForSSRFWithPolicy(
 
   let resolvedAddresses: Array<{ address: string; family: number }>;
   try {
-    resolvedAddresses = await dns.lookup(hostname, { all: true, verbatim: true });
+    resolvedAddresses = await lookupAddresses(hostname);
   } catch {
     return 'Unable to verify hostname safety';
   }

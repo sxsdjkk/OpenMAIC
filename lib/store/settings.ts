@@ -666,6 +666,7 @@ const getDefaultAudioConfig = () => ({
   asrProviderId: 'browser-native' as ASRProviderId,
   asrLanguage: 'zh-CN',
   ttsProvidersConfig: {
+    'openrouter-tts': { apiKey: '', baseUrl: '', enabled: true },
     // Built-in providers default enabled:true — they only ever surface once
     // configured (API key or server-managed), so "enabled" is a user opt-OUT,
     // not the visibility gate. A server-configured provider must not be hidden

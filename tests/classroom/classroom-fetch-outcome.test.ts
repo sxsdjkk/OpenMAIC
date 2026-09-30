@@ -8,8 +8,23 @@ import { fetchClassroomFromApi, type ClassroomFetchResult } from '@/lib/classroo
 
 describe('fetchClassroomFromApi outcome classification (#1450)', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('retries a legacy classroom while Queue prepares its read view', async () => {
+    vi.useFakeTimers();
+    const classroom = { stage: { id: 'legacy' }, scenes: [] };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 503, headers: { 'Retry-After': '2' } }))
+      .mockResolvedValueOnce(Response.json({ success: true, classroom }));
+    vi.stubGlobal('fetch', fetch);
+    const result = fetchClassroomFromApi('legacy');
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(result).resolves.toMatchObject({ outcome: 'found', classroom });
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it('returns found when the classroom payload is present', async () => {

@@ -10,7 +10,12 @@ import type { LoadedPrompt, PromptId, PromptVariableDefaults, SnippetId } from '
 // `src/prompts` and `dist/prompts` have the same depth below the package root.
 // Resolve from this module's URL via path operations so app bundlers do not
 // mistake the Markdown directory for a statically imported module asset.
-const DEFAULT_PROMPTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+function defaultPromptsDir(): string {
+  if (process.env.CLOUDFLARE_WORKERS === '1') {
+    return '/bundle/packages/@openmaic/generation';
+  }
+  return resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+}
 
 const PROMPT_VARIABLE_DEFAULTS = {
   'pbl-actions': {
@@ -26,7 +31,7 @@ function isMissingFileError(error: unknown): boolean {
 /** Load a snippet by ID. */
 export function loadSnippet(
   snippetId: SnippetId,
-  promptsDir: string = DEFAULT_PROMPTS_DIR,
+  promptsDir: string = defaultPromptsDir(),
 ): string {
   const snippetPath = join(promptsDir, 'snippets', `${snippetId}.md`);
 
@@ -41,7 +46,7 @@ export function loadSnippet(
 /** Replace snippet includes with their file content. */
 export function processSnippets(
   template: string,
-  promptsDir: string = DEFAULT_PROMPTS_DIR,
+  promptsDir: string = defaultPromptsDir(),
 ): string {
   return template.replace(/\{\{snippet:(\w[\w-]*)\}\}/g, (_, snippetId) => {
     return loadSnippet(snippetId as SnippetId, promptsDir);
@@ -64,7 +69,7 @@ export function processConditionalBlocks(
 /** Load a prompt by ID. */
 export function loadPrompt(
   promptId: PromptId,
-  promptsDir: string = DEFAULT_PROMPTS_DIR,
+  promptsDir: string = defaultPromptsDir(),
 ): LoadedPrompt | null {
   const promptDir = join(promptsDir, 'templates', promptId);
   const systemPath = join(promptDir, 'system.md');
@@ -126,7 +131,7 @@ function applyPromptVariableDefaults(
 export function buildPrompt(
   promptId: PromptId,
   variables: Record<string, unknown>,
-  promptsDir: string = DEFAULT_PROMPTS_DIR,
+  promptsDir: string = defaultPromptsDir(),
 ): { system: string; user: string } | null {
   const prompt = loadPrompt(promptId, promptsDir);
   if (!prompt) return null;

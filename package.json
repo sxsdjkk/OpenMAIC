@@ -15,6 +15,8 @@
     "gen:video-export-noto-script-fonts": "node scripts/generate-video-export-noto-script-fonts.mjs",
     "dev": "next dev",
     "build": "node scripts/assert-vendor-maic-importer.mjs && next build",
+    "build:workers": "node scripts/build-workers.mjs",
+    "deploy:workers": "wrangler deploy --no-autoconfig --env-file /dev/null",
     "start": "next start",
     "lint": "eslint",
     "check:i18n-keys": "node scripts/check-i18n-keys.mjs",
@@ -117,7 +119,7 @@
     "mitt": "^3.0.1",
     "motion": "^12.27.5",
     "nanoid": "5.1.16",
-    "next": "16.3.3",
+    "next": "16.3.6",
     "next-themes": "^0.4.6",
     "openai": "^4.104.0",
     "parse-srcset": "^1.0.2",
@@ -145,6 +147,7 @@
     "react-colorful": "^5.7.0",
     "react-dom": "19.2.3",
     "react-i18next": "^17.0.1",
+    "remark-cjk-friendly": "^2.3.1",
     "sanitize-html": "2.17.0",
     "shadcn": "^3.6.3",
     "sharp": "0.35.4",
@@ -164,13 +167,13 @@
     "unpdf": "^1.4.0",
     "use-stick-to-bottom": "^1.1.1",
     "zod": "^4.3.5",
-    "zustand": "^5.0.10",
-    "remark-cjk-friendly": "^2.3.1"
+    "zustand": "^5.0.10"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.16",
     "@fontsource/noto-sans": "5.3.0",
     "@fontsource/noto-sans-arabic": "5.3.0",
+    "@opennextjs/cloudflare": "^1.20.7",
     "@playwright/test": "^1.58.2",
     "@rollup/plugin-commonjs": "^28.0.1",
     "@rollup/plugin-node-resolve": "^16.0.1",
@@ -185,7 +188,7 @@
     "@types/sanitize-html": "^2.16.1",
     "@types/tinycolor2": "^1.4.6",
     "eslint": "^9",
-    "eslint-config-next": "16.2.11",
+    "eslint-config-next": "16.3.6",
     "fake-indexeddb": "^6.2.5",
     "fontkit": "2.0.4",
     "gsap": "^3.15.0",
@@ -199,7 +202,8 @@
     "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.1.8",
-    "vue-to-react": "^1.0.0"
+    "vue-to-react": "^1.0.0",
+    "wrangler": "^4.143.0"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [

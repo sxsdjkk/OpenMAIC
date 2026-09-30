@@ -22,6 +22,9 @@ const log = createLogger('PromptLoader');
  * Get the prompts directory path
  */
 function getPromptsDir(): string {
+  if (process.env.CLOUDFLARE_WORKERS === '1') {
+    return '/bundle/lib/prompts';
+  }
   // In Next.js, use process.cwd() for the project root
   return path.join(process.cwd(), 'lib', 'prompts');
 }

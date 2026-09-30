@@ -3,6 +3,8 @@
   // `exclude` replaces the inherited list; keep shared entries in sync with tsconfig.json.
   "exclude": [
     "node_modules",
+    ".next/types",
+    ".next/dev/types",
     "dist",
     "packages/*/src",
     "packages/docs",

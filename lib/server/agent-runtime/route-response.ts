@@ -12,7 +12,7 @@ import { apiError, type ApiErrorCode } from '@/lib/server/api-response';
  */
 
 /** Attach the owner-resolution headers (e.g. a minted Set-Cookie) to a response. */
-export function withOwnerResponseHeaders(response: NextResponse, headers: Headers): NextResponse {
+export function withOwnerResponseHeaders<T extends Response>(response: T, headers: Headers): T {
   for (const [key, value] of headers) response.headers.append(key, value);
   return response;
 }
@@ -29,7 +29,7 @@ export function ownerApiError(
   message: string,
   headers: Headers,
   details?: string,
-): NextResponse {
+): Response {
   return withOwnerResponseHeaders(apiError(code, status, message, details), headers);
 }
 

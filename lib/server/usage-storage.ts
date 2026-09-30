@@ -90,6 +90,9 @@ export async function recordUsage(
   input: UsageRecordInput,
   opts: RecordOptions = {},
 ): Promise<void> {
+  // Workers has no durable local usage directory; do not spend request CPU on
+  // filesystem writes and error stacks that cannot persist anything there.
+  if (process.env.CLOUDFLARE_WORKERS === '1' && !opts.baseDir) return;
   // A test run must never append to the app's real usage log. Any test that
   // exercises callLLM / streamLLM reaches this through `recordUsageSafe` without
   // asking for it, and used to write rows into the live `data/usage/` file —

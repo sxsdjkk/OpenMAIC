@@ -298,7 +298,16 @@ export async function fetchClassroomFromApi(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<ClassroomFetchResult> {
   try {
-    const res = await fetchImpl(`/api/classroom?id=${encodeURIComponent(classroomId)}`);
+    let res = await fetchImpl(`/api/classroom?id=${encodeURIComponent(classroomId)}`);
+    // Legacy R2 courses are sanitized by the Queue before the lightweight API serves them.
+    for (
+      let attempt = 0;
+      res.status === 503 && res.headers.get('Retry-After') === '2' && attempt < 5;
+      attempt++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      res = await fetchImpl(`/api/classroom?id=${encodeURIComponent(classroomId)}`);
+    }
     if (!res.ok) {
       // These responses positively establish that this immutable id cannot
       // resolve to a classroom. Authentication, authorization, conflict, and

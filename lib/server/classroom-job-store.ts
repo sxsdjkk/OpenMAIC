@@ -1,4 +1,3 @@
-import { promises as fs } from 'fs';
 import path from 'path';
 import type {
   ClassroomGenerationProgress,
@@ -9,6 +8,7 @@ import type {
 import {
   CLASSROOM_JOBS_DIR,
   ensureClassroomJobsDir,
+  readClassroomJsonFile,
   writeJsonFileAtomic,
 } from '@/lib/server/classroom-storage';
 
@@ -124,16 +124,8 @@ export async function createClassroomGenerationJob(
 export async function readClassroomGenerationJob(
   jobId: string,
 ): Promise<ClassroomGenerationJob | null> {
-  try {
-    const content = await fs.readFile(jobFilePath(jobId), 'utf-8');
-    const job = JSON.parse(content) as ClassroomGenerationJob;
-    return markStaleIfNeeded(job);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
+  const content = await readClassroomJsonFile(jobFilePath(jobId));
+  return content ? markStaleIfNeeded(JSON.parse(content) as ClassroomGenerationJob) : null;
 }
 
 export async function updateClassroomGenerationJob(

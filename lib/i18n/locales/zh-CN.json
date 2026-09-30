@@ -1400,6 +1400,7 @@
     "enterApiKey": "输入 API Key",
     "enterCustomBaseUrl": "输入自定义 Base URL",
     "browserNativeNote": "浏览器原生 ASR 无需配置，完全免费",
+    "providerOpenRouterTTS": "OpenRouter · Fish Audio（免费）",
     "providerOpenAITTS": "OpenAI TTS (gpt-4o-mini-tts)",
     "providerAzureTTS": "Azure TTS",
     "providerGLMTTS": "GLM TTS",

@@ -1385,6 +1385,7 @@
     "enterApiKey": "輸入 API Key",
     "enterCustomBaseUrl": "輸入自訂 Base URL",
     "browserNativeNote": "瀏覽器原生 ASR 無須設定，完全免費",
+    "providerOpenRouterTTS": "OpenRouter · Fish Audio（免費）",
     "providerOpenAITTS": "OpenAI TTS (gpt-4o-mini-tts)",
     "providerAzureTTS": "Azure TTS",
     "providerGLMTTS": "GLM TTS",

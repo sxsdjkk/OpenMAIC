@@ -15,7 +15,6 @@
  * Response: { success: boolean, result?: ImageGenerationResult, error?: string }
  */
 
-import { NextRequest } from 'next/server';
 import { recordGenerationUsage } from '@/lib/server/usage-storage';
 import { generateImage, IMAGE_PROVIDERS } from '@/lib/media/image-providers';
 import {
@@ -41,7 +40,7 @@ const log = createLogger('ImageGeneration API');
 // (Self-hosted Node servers ignore this value entirely.)
 export const maxDuration = 300;
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ImageGenerationOptions;
 

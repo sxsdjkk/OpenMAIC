@@ -292,6 +292,7 @@ export async function generateTTS(
   const signal = ttsRequestSignal(config.signal);
   try {
     switch (config.providerId) {
+      case 'openrouter-tts':
       case 'openai-tts':
         return await generateOpenAITTS(config, text, signal);
 
@@ -350,9 +351,14 @@ async function generateOpenAITTS(
   text: string,
   signal: AbortSignal,
 ): Promise<TTSGenerationResult> {
-  const baseUrl = config.baseUrl || TTS_PROVIDERS['openai-tts'].defaultBaseUrl;
+  const isOpenRouter = config.providerId === 'openrouter-tts';
+  const providerName = isOpenRouter ? 'OpenRouter' : 'OpenAI';
+  const baseUrl =
+    config.baseUrl ||
+    (isOpenRouter
+      ? TTS_PROVIDERS['openrouter-tts'].defaultBaseUrl
+      : TTS_PROVIDERS['openai-tts'].defaultBaseUrl);
 
-  // Use gpt-4o-mini-tts for best quality and intelligent realtime applications
   const response = await ttsFetch(config.publicOnly, `${baseUrl}/audio/speech`, {
     method: 'POST',
     headers: {
@@ -360,28 +366,27 @@ async function generateOpenAITTS(
       'Content-Type': 'application/json; charset=utf-8',
     },
     body: JSON.stringify({
-      model: config.modelId || 'gpt-4o-mini-tts',
+      model: isOpenRouter
+        ? TTS_PROVIDERS['openrouter-tts'].defaultModelId
+        : config.modelId || TTS_PROVIDERS['openai-tts'].defaultModelId,
       input: text,
       voice: config.voice,
       speed: config.speed || 1.0,
-      // Ask for a container the browser can decode. OpenAI defaults to mp3, but
-      // this same function serves every custom OpenAI-compatible provider and
-      // their defaults differ — OpenRouter's /audio/speech defaults to raw
-      // `pcm`, which arrives headerless, gets labelled mp3 below, and fails in
-      // the client with "no supported source was found". Naming the format
-      // removes the guess. Providers that ignore the field are unaffected.
-      response_format: 'mp3',
+      // OpenRouter defaults to raw PCM; the browser expects a decodable MP3.
+      ...(isOpenRouter ? { response_format: 'mp3' } : {}),
     }),
     signal,
   });
 
   if (!response.ok) {
-    throwIfTtsRateLimited('OpenAI', response.status, response.headers?.get('retry-after'));
+    throwIfTtsRateLimited(providerName, response.status, response.headers?.get('retry-after'));
     const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(`OpenAI TTS API error: ${error.error?.message || response.statusText}`);
+    throw new Error(
+      `${providerName} TTS API error: ${error.error?.message || response.statusText}`,
+    );
   }
 
-  return await validateTTSAudioResponse(response, 'OpenAI');
+  return await validateTTSAudioResponse(response, providerName);
 }
 
 /**

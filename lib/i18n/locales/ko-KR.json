@@ -1400,6 +1400,7 @@
     "enterApiKey": "API 키 입력",
     "enterCustomBaseUrl": "사용자 지정 Base URL 입력",
     "browserNativeNote": "브라우저 기본 ASR은 별도 설정이 필요 없으며 완전히 무료입니다",
+    "providerOpenRouterTTS": "OpenRouter · Fish Audio Free",
     "providerOpenAITTS": "OpenAI TTS (gpt-4o-mini-tts)",
     "providerAzureTTS": "Azure TTS",
     "providerGLMTTS": "GLM TTS",

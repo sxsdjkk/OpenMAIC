@@ -598,6 +598,26 @@ function HomePage() {
     // Flip the generating UI state before material bytes are copied locally.
     setPreparingGenerate(true);
     try {
+      if (process.env.CLOUDFLARE_WORKERS === '1') {
+        if (frozenMaterials.length)
+          throw new Error('Workers 第一阶段暂不支持上传资料，请输入学习主题。');
+        const response = await fetch('/api/generate-classroom', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requirement: form.requirement,
+            enableTTS: settingsSnapshot.ttsEnabled,
+            enableImageGeneration: false,
+            enableVideoGeneration: false,
+            enableWebSearch: settingsSnapshot.webSearchEnabled,
+            agentMode: 'default',
+          }),
+        });
+        const job = await response.json();
+        if (!response.ok || !job.success) throw new Error(job.error || '课程生成提交失败');
+        window.location.assign(`/worker-generation?jobId=${encodeURIComponent(job.jobId)}`);
+        return;
+      }
       const userProfile = useUserProfileStore.getState();
       const requirements: UserRequirements = {
         requirement: form.requirement,

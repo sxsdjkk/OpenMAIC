@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import {
   isServerConfiguredProvider,
   resolveManagedAliDocMindCredentials,
@@ -103,7 +103,7 @@ function supportsMimeType(
 function validateJsonPathProvider(
   providerId: string | undefined,
   mimeType: string,
-): NextResponse | null {
+): Response | null {
   if (!providerId) return null;
   if (SUPPORTED_MEDIA_MIME_TYPES.includes(mimeType)) {
     const mediaProvider = getMediaExtractorProvider(providerId);

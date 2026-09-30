@@ -1400,6 +1400,7 @@
     "enterApiKey": "Nhập khóa API",
     "enterCustomBaseUrl": "Nhập địa chỉ gốc tùy chỉnh",
     "browserNativeNote": "Nhận dạng giọng nói của trình duyệt không cần cấu hình gì và hoàn toàn miễn phí",
+    "providerOpenRouterTTS": "OpenRouter · Fish Audio Free",
     "providerOpenAITTS": "OpenAI TTS (gpt-4o-mini-tts)",
     "providerAzureTTS": "Azure TTS",
     "providerGLMTTS": "GLM TTS",

@@ -1400,6 +1400,7 @@
     "enterApiKey": "Enter API Key",
     "enterCustomBaseUrl": "Enter custom Base URL",
     "browserNativeNote": "Browser Native ASR requires no configuration and is completely free",
+    "providerOpenRouterTTS": "OpenRouter · Fish Audio Free",
     "providerOpenAITTS": "OpenAI TTS (gpt-4o-mini-tts)",
     "providerAzureTTS": "Azure TTS",
     "providerGLMTTS": "GLM TTS",

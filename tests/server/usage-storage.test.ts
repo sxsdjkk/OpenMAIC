@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -11,6 +11,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -30,6 +32,14 @@ const llmInput: UsageRecordInput = {
 };
 
 describe('recordUsage — LLM', () => {
+  it('does not attempt local filesystem usage writes in Workers', async () => {
+    vi.stubEnv('CLOUDFLARE_WORKERS', '1');
+    vi.stubEnv('VITEST', '');
+    vi.stubEnv('NODE_ENV', 'production');
+    const mkdir = vi.spyOn(fs, 'mkdir');
+    await recordUsage(llmInput);
+    expect(mkdir).not.toHaveBeenCalled();
+  });
   it('appends a jsonl line with token counts and no cost fields', async () => {
     await recordUsage(llmInput, { baseDir: tmpDir });
     const records = await readUsageRecords({ baseDir: tmpDir });

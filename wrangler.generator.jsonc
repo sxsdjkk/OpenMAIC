@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ai-learning-agent-generator",
+  "main": "workers/classroom-generator.ts",
+  "minify": true,
+  "base_dir": ".",
+  "find_additional_modules": true,
+  "rules": [
+    {
+      "type": "Text",
+      "globs": [
+        "packages/@openmaic/generation/templates/**/*.md",
+        "packages/@openmaic/generation/snippets/*.md",
+        "packages/@openmaic/generation/prompts-pbl/*.md",
+        "lib/prompts/templates/**/*.md",
+        "lib/prompts/snippets/*.md",
+      ],
+      "fallthrough": false,
+    },
+    { "type": "Data", "globs": [], "fallthrough": false },
+    { "type": "CompiledWasm", "globs": [], "fallthrough": false },
+  ],
+  "compatibility_date": "2026-09-29",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "r2_buckets": [
+    {
+      "binding": "CLASSROOM_BUCKET",
+      "bucket_name": "ai-learning-agent-classrooms",
+    },
+  ],
+  "queues": {
+    "consumers": [
+      {
+        "queue": "ai-learning-agent-generation",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 2,
+      },
+    ],
+  },
+  "vars": {
+    "CLOUDFLARE_WORKERS": "1",
+    "OPENAI_BASE_URL": "https://api.deepseek.com",
+    "OPENAI_MODELS": "deepseek-flash",
+    "DEFAULT_MODEL": "openai:deepseek-flash",
+    "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+    "TTS_OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+    "TTS_OPENROUTER_MODELS": "fish-audio/s2.1-pro-free:free",
+    "TTS_OPENAI_ENABLED": "false",
+  },
+}

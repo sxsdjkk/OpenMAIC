@@ -11,6 +11,7 @@ import {
   withGenerationRetry,
   type AICallFn,
   type AgentInfo,
+  type SceneOutline,
 } from '@openmaic/generation';
 import { createSceneWithActions } from '@/lib/server/scene-generation';
 import { generatePBLV2Project } from '@/lib/pbl/v2/agents/planner';
@@ -248,23 +249,22 @@ function ttsResultWarning(
   return fallback;
 }
 
-export async function generateClassroom(
-  input: GenerateClassroomInput,
-  options: {
-    baseUrl: string;
-    signal?: AbortSignal;
-    onProgress?: (progress: ClassroomGenerationProgress) => Promise<void> | void;
-  },
-): Promise<GenerateClassroomResult> {
-  const { requirement, pdfContent } = input;
+export interface ClassroomGenerationOptions {
+  baseUrl: string;
+  signal?: AbortSignal;
+  onProgress?: (progress: ClassroomGenerationProgress) => Promise<void> | void;
+}
 
-  await options.onProgress?.({
-    step: 'initializing',
-    progress: 5,
-    message: 'Initializing classroom generation',
-    scenesGenerated: 0,
-  });
+/** Serializable plan shared by independent Queue scene tasks. No provider credentials. */
+export interface ClassroomGenerationPlan {
+  stage: Stage;
+  outlines: SceneOutline[];
+  agents: AgentInfo[];
+  languageDirective: string;
+  vocationalActive: boolean;
+}
 
+async function createClassroomModelCalls(signal?: AbortSignal) {
   const {
     model: languageModel,
     modelInfo,
@@ -301,6 +301,7 @@ export async function generateClassroom(
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
+        abortSignal: signal,
         maxOutputTokens: modelInfo?.outputWindow,
       },
       'generate-classroom',
@@ -403,6 +404,7 @@ export async function generateClassroom(
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
+          abortSignal: signal,
           maxOutputTokens: outputWindow,
           maxRetries: 0,
         },
@@ -431,6 +433,7 @@ export async function generateClassroom(
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
+          abortSignal: signal,
           maxOutputTokens: outputWindow,
         },
         'generate-classroom',
@@ -457,6 +460,7 @@ export async function generateClassroom(
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
+          abortSignal: signal,
           maxOutputTokens: outputWindow,
           maxRetries: 0,
         },
@@ -471,6 +475,25 @@ export async function generateClassroom(
   };
 
   const searchQueryAiCall: AICallFn = async (systemPrompt, userPrompt, _images) => {
+    // Re-resolve the query-rewrite model only when explicitly routed. If
+    // resolution itself fails (e.g. unknown provider in the route), fall back
+    // to the classroom model here; a route with a missing key resolves fine
+    // and surfaces only later in callLLM, which the outer try/catch below
+    // degrades gracefully — either way the pipeline still works.
+    const rewriteRoute = getStageModel('web-search-query-rewrite');
+    if (rewriteRoute) {
+      try {
+        const rewriteResolved = await resolveModel({ stage: 'web-search-query-rewrite' });
+        searchQueryModel = rewriteResolved.model;
+        searchQueryThinking = rewriteResolved.thinkingConfig;
+        searchQueryServerManaged = rewriteResolved.serverManaged;
+      } catch (err) {
+        log.warn(
+          `web-search-query-rewrite route "${rewriteRoute}" unavailable; using classroom model for query rewrite`,
+          err,
+        );
+      }
+    }
     const result = await callLLM(
       {
         model: searchQueryModel,
@@ -478,6 +501,7 @@ export async function generateClassroom(
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
+        abortSignal: signal,
         maxOutputTokens: 256,
       },
       'web-search-query-rewrite',
@@ -488,6 +512,29 @@ export async function generateClassroom(
     return result.text;
   };
 
+  return {
+    aiCall,
+    getAgentProfilesAiCall,
+    resolveSceneContentCall,
+    getSceneActionsAiCall,
+    searchQueryAiCall,
+  };
+}
+
+export async function prepareClassroomGeneration(
+  input: GenerateClassroomInput,
+  options: ClassroomGenerationOptions,
+  calls?: Awaited<ReturnType<typeof createClassroomModelCalls>>,
+): Promise<ClassroomGenerationPlan> {
+  const { requirement, pdfContent } = input;
+  await options.onProgress?.({
+    step: 'initializing',
+    progress: 5,
+    message: 'Initializing classroom generation',
+    scenesGenerated: 0,
+  });
+  const { aiCall, getAgentProfilesAiCall, searchQueryAiCall } =
+    calls ?? (await createClassroomModelCalls(options.signal));
   const requirements: UserRequirements = {
     requirement,
   };
@@ -506,25 +553,6 @@ export async function generateClassroom(
   if (input.enableWebSearch) {
     const webSearchConfig = resolveClassroomWebSearchConfig(input);
     if (webSearchConfig) {
-      // Re-resolve the query-rewrite model only when explicitly routed. If
-      // resolution itself fails (e.g. unknown provider in the route), fall back
-      // to the classroom model here; a route with a missing key resolves fine
-      // and surfaces only later in callLLM, which the outer try/catch below
-      // degrades gracefully — either way the pipeline still works.
-      const rewriteRoute = getStageModel('web-search-query-rewrite');
-      if (rewriteRoute) {
-        try {
-          const rewriteResolved = await resolveModel({ stage: 'web-search-query-rewrite' });
-          searchQueryModel = rewriteResolved.model;
-          searchQueryThinking = rewriteResolved.thinkingConfig;
-          searchQueryServerManaged = rewriteResolved.serverManaged;
-        } catch (err) {
-          log.warn(
-            `web-search-query-rewrite route "${rewriteRoute}" unavailable; using classroom model for query rewrite`,
-            err,
-          );
-        }
-      }
       try {
         const searchQuery = await buildSearchQuery(requirement, pdfText, searchQueryAiCall);
 
@@ -610,7 +638,7 @@ export async function generateClassroom(
     agents = getDefaultAgents();
   }
 
-  const { id: stageId, stage } = await reserveGeneratedClassroom((id) => ({
+  const { stage } = await reserveGeneratedClassroom((id) => ({
     id,
     name: courseTitle || outlines[0]?.title || requirement.slice(0, 50),
     description: undefined,
@@ -639,108 +667,144 @@ export async function generateClassroom(
         }),
   }));
 
+  return { stage, outlines, agents, languageDirective, vocationalActive };
+}
+
+export async function generateClassroomScene(
+  plan: ClassroomGenerationPlan,
+  index: number,
+  options: ClassroomGenerationOptions,
+  calls?: Awaited<ReturnType<typeof createClassroomModelCalls>>,
+): Promise<Scene | null> {
+  const { stage, outlines, agents, languageDirective, vocationalActive } = plan;
+  const outline = outlines[index];
+  if (!outline) throw new Error('Invalid scene index');
+  const { resolveSceneContentCall, getSceneActionsAiCall } =
+    calls ?? (await createClassroomModelCalls(options.signal));
+  const safeOutline = applyOutlineFallbacks(outline, true, {
+    allowProceduralSkill: vocationalActive,
+  });
+  const progressStart = 30 + Math.floor((index / Math.max(outlines.length, 1)) * 60);
+  const generatedScenes = index;
+  const store = createInMemoryStore(stage);
+  const api = createStageAPI(store);
+  const reportSceneRetry = async (
+    phase: 'content' | 'actions',
+    event: { attempt: number; maxAttempts: number; reason: string },
+  ) => {
+    const nextAttempt = Math.min(event.attempt + 1, event.maxAttempts);
+    const message = `Retrying scene ${index + 1}/${outlines.length} ${phase} (${nextAttempt}/${event.maxAttempts}): ${safeOutline.title}`;
+    log.warn(`${message} — ${event.reason}`);
+    await options.onProgress?.({
+      step: 'generating_scenes',
+      progress: Math.max(progressStart, 31),
+      message,
+      scenesGenerated: generatedScenes,
+      totalScenes: outlines.length,
+    });
+  };
+
+  // Resolve this scene's content model lazily, per outline type. The package
+  // gets the provider-bound AICallFn and the app injects its agentic PBL loop
+  // as the classified fallback, preserving single-call → loop routing.
+  const contentCall = await resolveSceneContentCall(safeOutline.type);
+  const content = await (async () => {
+    try {
+      return await withGenerationRetry(
+        () =>
+          generateSceneContent(safeOutline, contentCall.aiCall, {
+            agents,
+            languageDirective,
+            allowProceduralSkill: vocationalActive,
+            ...(safeOutline.type === 'pbl'
+              ? {
+                  pblLoopFallback: (input) =>
+                    generatePBLV2Project(
+                      input,
+                      contentCall.model,
+                      (params, ...args) =>
+                        callLLM({ ...params, abortSignal: options.signal }, ...args),
+                      { logger: log },
+                      contentCall.thinking,
+                    ),
+                }
+              : {}),
+          }),
+        {
+          label: `scene ${index + 1}/${outlines.length} content`,
+          shouldRetryResult: (result) => result === null,
+          onRetry: (event) => reportSceneRetry('content', event),
+        },
+      );
+    } catch (error) {
+      return containPBLGenerationError(error, safeOutline.title);
+    }
+  })();
+  if (!content) {
+    log.warn(`Skipping scene "${safeOutline.title}" — content generation failed`);
+    return null;
+  }
+
+  const actionsAiCall = await getSceneActionsAiCall();
+  const actions = await withGenerationRetry(
+    () =>
+      generateSceneActions(safeOutline, content, actionsAiCall, {
+        agents,
+        languageDirective,
+      }),
+    {
+      label: `scene ${index + 1}/${outlines.length} actions`,
+      onRetry: (event) => reportSceneRetry('actions', event),
+    },
+  );
+  log.info(`Scene "${safeOutline.title}": ${actions.length} actions`);
+
+  const sceneId = createSceneWithActions(safeOutline, content, actions, api);
+  if (!sceneId) {
+    log.warn(`Skipping scene "${safeOutline.title}" — scene creation failed`);
+    return null;
+  }
+
+  return store.getState().scenes.find((scene) => scene.id === sceneId) ?? null;
+}
+
+export async function generateClassroom(
+  input: GenerateClassroomInput,
+  options: ClassroomGenerationOptions,
+): Promise<GenerateClassroomResult> {
+  const calls = await createClassroomModelCalls(options.signal);
+  const plan = await prepareClassroomGeneration(input, options, calls);
+  const { stage, outlines } = plan;
+  const stageId = stage.id;
   // The reservation above claims the id; everything below owns it. If
   // generation throws before `persistClassroom` succeeds, release the
   // placeholder so a failed run does not burn the id or leave an unreadable
   // file behind. `persisted` is the completion marker.
   let persisted: Awaited<ReturnType<typeof persistClassroom>> | undefined;
   try {
-    const store = createInMemoryStore(stage);
-    const api = createStageAPI(store);
-
-    log.info('Stage 2: Generating scene content and actions...');
+    const scenes: Scene[] = [];
     let generatedScenes = 0;
-
     for (const [index, outline] of outlines.entries()) {
-      const safeOutline = applyOutlineFallbacks(outline, true, {
-        allowProceduralSkill: vocationalActive,
-      });
       const progressStart = 30 + Math.floor((index / Math.max(outlines.length, 1)) * 60);
-
       await options.onProgress?.({
         step: 'generating_scenes',
         progress: Math.max(progressStart, 31),
-        message: `Generating scene ${index + 1}/${outlines.length}: ${safeOutline.title}`,
+        message: `Generating scene ${index + 1}/${outlines.length}: ${outline.title}`,
         scenesGenerated: generatedScenes,
         totalScenes: outlines.length,
       });
-
-      const reportSceneRetry = async (
-        phase: 'content' | 'actions',
-        event: { attempt: number; maxAttempts: number; reason: string },
-      ) => {
-        const nextAttempt = Math.min(event.attempt + 1, event.maxAttempts);
-        const message = `Retrying scene ${index + 1}/${outlines.length} ${phase} (${nextAttempt}/${event.maxAttempts}): ${safeOutline.title}`;
-        log.warn(`${message} — ${event.reason}`);
-        await options.onProgress?.({
-          step: 'generating_scenes',
-          progress: Math.max(progressStart, 31),
-          message,
-          scenesGenerated: generatedScenes,
-          totalScenes: outlines.length,
-        });
-      };
-
-      // Resolve this scene's content model lazily, per outline type. The package
-      // gets the provider-bound AICallFn and the app injects its agentic PBL loop
-      // as the classified fallback, preserving single-call → loop routing.
-      const contentCall = await resolveSceneContentCall(safeOutline.type);
-      const content = await (async () => {
-        try {
-          return await withGenerationRetry(
-            () =>
-              generateSceneContent(safeOutline, contentCall.aiCall, {
-                agents,
-                languageDirective,
-                allowProceduralSkill: vocationalActive,
-                ...(safeOutline.type === 'pbl'
-                  ? {
-                      pblLoopFallback: (input) =>
-                        generatePBLV2Project(
-                          input,
-                          contentCall.model,
-                          callLLM,
-                          { logger: log },
-                          contentCall.thinking,
-                        ),
-                    }
-                  : {}),
-              }),
-            {
-              label: `scene ${index + 1}/${outlines.length} content`,
-              shouldRetryResult: (result) => result === null,
-              onRetry: (event) => reportSceneRetry('content', event),
-            },
-          );
-        } catch (error) {
-          return containPBLGenerationError(error, safeOutline.title);
-        }
-      })();
-      if (!content) {
-        log.warn(`Skipping scene "${safeOutline.title}" — content generation failed`);
-        continue;
-      }
-
-      const actionsAiCall = await getSceneActionsAiCall();
-      const actions = await withGenerationRetry(
-        () =>
-          generateSceneActions(safeOutline, content, actionsAiCall, {
-            agents,
-            languageDirective,
-          }),
+      const scene = await generateClassroomScene(
+        plan,
+        index,
         {
-          label: `scene ${index + 1}/${outlines.length} actions`,
-          onRetry: (event) => reportSceneRetry('actions', event),
+          ...options,
+          onProgress: (event) =>
+            options.onProgress?.({ ...event, scenesGenerated: generatedScenes }),
         },
+        calls,
       );
-      log.info(`Scene "${safeOutline.title}": ${actions.length} actions`);
-
-      const sceneId = createSceneWithActions(safeOutline, content, actions, api);
-      if (!sceneId) {
-        log.warn(`Skipping scene "${safeOutline.title}" — scene creation failed`);
-        continue;
-      }
-
+      if (!scene) continue;
+      scenes.push(scene);
       generatedScenes += 1;
       const progressEnd = 30 + Math.floor(((index + 1) / Math.max(outlines.length, 1)) * 60);
       await options.onProgress?.({
@@ -752,7 +816,6 @@ export async function generateClassroom(
       });
     }
 
-    const scenes = store.getState().scenes;
     log.info(`Pipeline complete: ${scenes.length} scenes generated`);
 
     if (scenes.length === 0) {

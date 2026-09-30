@@ -222,6 +222,30 @@ describe('lightweight Workers entry', () => {
     expect(env.LEGACY_APP.fetch).not.toHaveBeenCalled();
   });
 
+  it('returns clip counts and terminates a stale job instead of an endless progress bar', async () => {
+    const job = {
+      status: 'running',
+      updatedAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+      progress: 86,
+      scenesGenerated: 12,
+      totalScenes: 12,
+      ttsGenerated: 24,
+      totalTts: 48,
+    };
+    env.CLASSROOM_BUCKET.get.mockResolvedValue({ text: async () => JSON.stringify(job) });
+    const response = await worker.fetch(request('/api/generate-classroom/job1'), env);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      done: true,
+      status: 'failed',
+      progress: 86,
+      ttsGenerated: 24,
+      totalTts: 48,
+      error: expect.stringContaining('长时间没有进展'),
+    });
+    expect(env.CLASSROOM_BUCKET.put).not.toHaveBeenCalled();
+  });
+
   it('streams queued TTS results without parsing or generating audio in HTTP', async () => {
     const text = vi.fn();
     env.CLASSROOM_BUCKET.get.mockResolvedValue({

@@ -1,0 +1,43 @@
+.track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.fill {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7c3aed, #8b5cf6, #a78bfa);
+  transition: width 600ms ease-out;
+}
+
+.running::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background: repeating-linear-gradient(115deg, transparent 0 12px, #ffffff40 12px 24px);
+  background-size: 48px 100%;
+  animation: flow 1.2s linear infinite;
+}
+
+.failed {
+  background: var(--destructive);
+}
+
+@keyframes flow {
+  to {
+    background-position: 48px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill {
+    transition: none;
+  }
+  .running::after {
+    animation: none;
+  }
+}

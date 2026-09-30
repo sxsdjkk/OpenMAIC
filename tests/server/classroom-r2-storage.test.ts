@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ClassroomBucket } from '@/lib/server/classroom-storage';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -10,7 +11,7 @@ describe('Workers classroom R2 storage', () => {
     vi.stubEnv('CLOUDFLARE_WORKERS', '1');
     const storage = await import('@/lib/server/classroom-storage');
     const objects = new Map<string, string | Uint8Array>();
-    const bucket: storage.ClassroomBucket = {
+    const bucket: ClassroomBucket = {
       async get(key) {
         const value = objects.get(key);
         if (value === undefined) return null;

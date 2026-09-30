@@ -220,6 +220,13 @@ async function route(request: Request, env: WebEnv): Promise<Response> {
     const object = await env.CLASSROOM_BUCKET.get(`jobs/${jobPath[1]}.json`);
     if (!object) return apiError('INVALID_REQUEST', 404, 'Job not found');
     const job: ClassroomGenerationJob = JSON.parse(await object.text());
+    // A hard runtime termination cannot write a failure. Do not animate/poll forever.
+    if (job.status === 'running' && Date.now() - Date.parse(job.updatedAt) > 30 * 60_000) {
+      job.status = 'failed';
+      job.step = 'failed';
+      job.error = '生成任务长时间没有进展，可能已中断，请重新生成。';
+      job.message = job.error;
+    }
     return apiSuccess({
       ...job,
       jobId: job.id,

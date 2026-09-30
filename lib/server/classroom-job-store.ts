@@ -32,6 +32,8 @@ export interface ClassroomGenerationJob {
   };
   scenesGenerated: number;
   totalScenes?: number;
+  ttsGenerated?: number;
+  totalTts?: number;
   result?: {
     classroomId: string;
     url: string;

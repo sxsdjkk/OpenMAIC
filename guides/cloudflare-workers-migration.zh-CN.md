@@ -107,4 +107,10 @@ node scripts/build-workers.mjs
 
 Workers 类型由 Wrangler 生成，`workers/generator-env.d.ts` 导出必要类型并保持模块作用域，避免污染 Next.js 的 DOM 类型。重新生成后须保留顶部的模块作用域类型导出；应用共享存储边界继续使用原 DOM Stream 契约。
 
-本轮发布生成器与网页，未改动私有兼容 Worker。真实长课验收记录将在本节补充；单元验证不等同于完整线上通过。
+本轮已发布生成器 `813be1e3-029f-445a-9c41-ce39ec00fb7d` 与网页 `234dc605-1478-47dd-8e84-169e7bd3e9ee`，未改动私有兼容 Worker，分支为 `codex/workers-free-tier-lite`。356 项回归、应用 TypeScript、Next/OpenNext 构建及部署检查通过；14146 个构建文件扫描未发现本地服务或飞书密钥值。
+
+真实长课已生成并保存 **12/12 节课件**，语音保存 **39/95 段** 后因 OpenRouter `free-models-per-day` HTTP 429 耗尽重试，明确进入失败状态，未发布为完整有声课程。39 个已保存音频均可解析为 MP3，累计约 23.06 分钟；R2 断点保留，失败任务不会自动恢复。账号限额接口返回每日免费请求 `used=55, limit=50, remaining=0`。继续使用当前免费模型完成 95 段语音需要跨日恢复能力或更高供应商额度，单纯重新生成整课会再次消耗已有额度。[OpenRouter 限额说明](https://openrouter.ai/docs/api_reference/limits)
+
+本次总任务持续约 34.8 分钟，但已拆为独立消息；生成器观测最大单次墙钟约 189.09 秒、CPU 59.66ms、内存 38.34MiB，没有再次触发 Cloudflare 墙钟或资源限制。最终网页版本观测最大 CPU 7.954ms、内存 2.91MiB。网页指标存在采样，不是所有请求的严格上界，也未验证高并发。无需为本次观察到的负载升级 Cloudflare 套餐；当前阻塞是语音供应商额度。
+
+另建 1 节、关闭语音的补测课程，36.089 秒完成生成、发布和 R2 读取，浏览器成功渲染：[为什么要保存学习进度](https://ai-learning-agent.sxsdjkk.workers.dev/worker-classroom?id=2zwu1IJd4g)。动效已实测条纹移动时百分比保持真实值，失败时停止动效与轮询。详细任务、版本、指标和未覆盖范围见 [独立 Queue 任务验收记录](cloudflare-queue-acceptance.zh-CN.md)。

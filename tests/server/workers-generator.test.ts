@@ -7,6 +7,7 @@ vi.mock('@/lib/server/classroom-job-store', () => ({
   markClassroomGenerationJobFailed: vi.fn(),
 }));
 vi.mock('@/app/api/generate/tts/route', () => ({ POST: vi.fn() }));
+vi.mock('@/lib/server/worker-generation-jobs', () => ({ indexAccountJob: vi.fn() }));
 vi.mock('@/lib/server/classroom-storage', () => ({
   publishClassroomReadView: vi.fn(),
   readClassroom: vi.fn(),
@@ -17,6 +18,7 @@ import generator from '@/workers/classroom-generator';
 import { POST as tts } from '@/app/api/generate/tts/route';
 import { publishClassroomReadView, readClassroom } from '@/lib/server/classroom-storage';
 import { runClassroomQueueTask } from '@/lib/server/classroom-queue-generation';
+import { indexAccountJob } from '@/lib/server/worker-generation-jobs';
 import {
   readClassroomGenerationJob,
   updateClassroomGenerationJob,
@@ -83,6 +85,28 @@ describe('Queue generation task boundaries', () => {
     expect(runClassroomQueueTask).toHaveBeenCalledWith(message.body, bucket, env.CLASSROOM_QUEUE);
     expect(message.ack).toHaveBeenCalledOnce();
     expect(message.retry).not.toHaveBeenCalled();
+  });
+
+  it('routes manual retries through the checkpoint runner rather than legacy publication', async () => {
+    const message = delivery({ kind: 'classroom-retry' as const, jobId: 'job1', attempt: 1 });
+    await generator.queue({ messages: [message] }, env);
+    expect(runClassroomQueueTask).toHaveBeenCalledExactlyOnceWith(
+      message.body,
+      bucket,
+      env.CLASSROOM_QUEUE,
+    );
+    expect(publishClassroomReadView).not.toHaveBeenCalled();
+    expect(tts).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledOnce();
+  });
+
+  it('backfills an account job index without running generation', async () => {
+    const ownerId = 'a'.repeat(64);
+    const message = delivery({ kind: 'index-account-job' as const, ownerId, jobId: 'job1' });
+    await generator.queue({ messages: [message] }, env);
+    expect(indexAccountJob).toHaveBeenCalledExactlyOnceWith(bucket, ownerId, 'job1');
+    expect(runClassroomQueueTask).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledOnce();
   });
 
   it('retries only the failed task and surfaces terminal failure after three attempts', async () => {

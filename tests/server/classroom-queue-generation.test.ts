@@ -253,6 +253,64 @@ describe('checkpointed classroom Queue tasks', () => {
     expect(queue.send).not.toHaveBeenCalled();
   });
 
+  it('manual retry dispatches only the saved next step without regenerating prior work', async () => {
+    await runClassroomQueueTask(start, bucket, queue);
+    await next();
+    pending.length = 0;
+    const saved = String(objects.get('jobs/job1/checkpoint.json'));
+    vi.mocked(readClassroomGenerationJob).mockResolvedValue({
+      status: 'queued',
+      ownerId: 'a'.repeat(64),
+      retryCount: 1,
+    } as never);
+    await runClassroomQueueTask(
+      { kind: 'classroom-retry', jobId: 'job1', attempt: 1 },
+      bucket,
+      queue,
+    );
+    expect(prepareClassroomGeneration).toHaveBeenCalledOnce();
+    expect(generateClassroomScene).toHaveBeenCalledOnce();
+    expect(objects.get('jobs/job1/checkpoint.json')).toBe(saved);
+    expect(pending).toEqual([{ kind: 'classroom-step', jobId: 'job1', phase: 'scene', index: 1 }]);
+    expect(claimCourse).toHaveBeenLastCalledWith(bucket, 'a'.repeat(64), 'course1');
+  });
+
+  it('recovers an early failure from the full saved input, not a truncated summary', async () => {
+    const full = { ...start, input: { requirement: '完整需求'.repeat(200), enableTTS: false } };
+    objects.set('jobs/job1/input.json', JSON.stringify(full));
+    vi.mocked(readClassroomGenerationJob).mockResolvedValue({
+      status: 'queued',
+      retryCount: 1,
+    } as never);
+    await runClassroomQueueTask(
+      { kind: 'classroom-retry', jobId: 'job1', attempt: 1 },
+      bucket,
+      queue,
+    );
+    expect(prepareClassroomGeneration).toHaveBeenCalledWith(
+      full.input,
+      expect.objectContaining({ baseUrl: full.baseUrl }),
+    );
+    expect(checkpoint().input).toEqual(full.input);
+  });
+
+  it('ignores obsolete retry messages and refuses missing legacy inputs', async () => {
+    vi.mocked(readClassroomGenerationJob).mockResolvedValue({
+      status: 'queued',
+      retryCount: 2,
+    } as never);
+    await runClassroomQueueTask(
+      { kind: 'classroom-retry', jobId: 'job1', attempt: 1 },
+      bucket,
+      queue,
+    );
+    expect(queue.send).not.toHaveBeenCalled();
+    expect(prepareClassroomGeneration).not.toHaveBeenCalled();
+    await expect(
+      runClassroomQueueTask({ kind: 'classroom-retry', jobId: 'job1', attempt: 2 }, bucket, queue),
+    ).rejects.toThrow('历史任务未保存完整需求');
+  });
+
   it('keeps consumer concurrency and retry limits consistent with checkpoint safety', () => {
     const config = readFileSync('wrangler.generator.jsonc', 'utf8');
     expect(config).toMatch(/"max_concurrency":\s*1/);

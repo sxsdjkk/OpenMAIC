@@ -10,6 +10,12 @@ import {
 } from '@/lib/server/worker-accounts';
 import { linkLegacyAccount } from '@/lib/server/worker-account-migration';
 import type { PersistedClassroomData } from '@/lib/server/classroom-storage';
+import {
+  indexAccountJob,
+  indexGenerationJob,
+  listGenerationJobs,
+} from '@/lib/server/worker-generation-jobs';
+import type { ClassroomGenerationJob } from '@/lib/server/classroom-job-store';
 
 describe('R2 learning accounts', () => {
   const owner = 'a'.repeat(64);
@@ -141,5 +147,67 @@ describe('R2 learning accounts', () => {
     await expect(
       linkLegacyAccount(bucket, { kind: 'link-legacy-account', ownerId: other, jobId: 'job1' }),
     ).rejects.toThrow('another account');
+  });
+
+  it('indexes legacy failed and stalled tasks without changing jobs or checkpoints', async () => {
+    const job = {
+      id: 'job1',
+      ownerId: owner,
+      status: 'failed',
+      progress: 84,
+      scenesGenerated: 12,
+      inputSummary: { requirementPreview: 'Python' },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      error: 'TTS failed',
+    } as ClassroomGenerationJob;
+    const raw = JSON.stringify(job);
+    await bucket.put('jobs/job1.json', raw);
+    await bucket.put('jobs/job1/checkpoint.json', 'complete checkpoint');
+    await indexAccountJob(bucket, owner, 'job1');
+    expect((await listGenerationJobs(bucket, owner)).jobs).toMatchObject([
+      { status: 'failed', canRetry: true, progress: 84 },
+    ]);
+    expect(objects.get('jobs/job1.json')!.value).toBe(raw);
+    expect(objects.get('jobs/job1/checkpoint.json')!.value).toBe('complete checkpoint');
+    expect((await listGenerationJobs(bucket, other)).jobs).toEqual([]);
+    await expect(indexAccountJob(bucket, other, 'job1')).rejects.toThrow('another account');
+    await indexGenerationJob(bucket, {
+      ...job,
+      id: 'old',
+      status: 'running',
+      updatedAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+    });
+    expect(
+      (await listGenerationJobs(bucket, owner)).jobs.find((j) => j.id === 'old'),
+    ).toMatchObject({
+      status: 'failed',
+      canRetry: false,
+      error: expect.stringContaining('长时间没有进展'),
+    });
+    await indexGenerationJob(bucket, { ...job, id: 'done', status: 'succeeded' });
+    expect((await listGenerationJobs(bucket, owner)).jobs.map((j) => j.id)).not.toContain('done');
+  });
+
+  it('bounds generation summary metadata and indexes full-input recovery before a checkpoint', async () => {
+    const job = {
+      id: 'job1',
+      ownerId: owner,
+      status: 'failed',
+      progress: 0,
+      scenesGenerated: 0,
+      inputSummary: { requirementPreview: '中文🚀'.repeat(1000) },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      error: '中文错误🚀'.repeat(1000),
+    } as ClassroomGenerationJob;
+    await bucket.put('jobs/job1/input.json', 'full input');
+    await indexGenerationJob(bucket, job);
+    expect((await listGenerationJobs(bucket, owner)).jobs[0].canRetry).toBe(true);
+    expect(
+      new TextEncoder().encode(
+        JSON.stringify(objects.get(`accounts/${owner}/jobs/job1.json`)!.customMetadata),
+      ).byteLength,
+    ).toBeLessThan(2048);
   });
 });

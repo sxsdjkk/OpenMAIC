@@ -1,5 +1,6 @@
 import type { StageListItem } from '@/lib/utils/stage-storage';
 import type { PlaybackCursor } from '@/lib/playback/cursor';
+import type { GenerationJobSummary } from './generation-job';
 
 export const isWorkerAccountEnabled = () => process.env.NEXT_PUBLIC_WORKERS_ACCOUNT === '1';
 
@@ -20,6 +21,29 @@ export async function listCloudCourses(): Promise<StageListItem[]> {
     cursor = page.cursor;
   } while (cursor);
   return courses.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export async function listCloudGenerationJobs(): Promise<GenerationJobSummary[]> {
+  const jobs: GenerationJobSummary[] = [];
+  let cursor: string | null = null;
+  do {
+    const page: { jobs: GenerationJobSummary[]; cursor: string | null } = await accountRequest(
+      `/api/account/jobs${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+    );
+    jobs.push(...page.jobs);
+    cursor = page.cursor;
+  } while (cursor);
+  return jobs.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+}
+
+export async function retryCloudGenerationJob(id: string): Promise<{ jobId: string }> {
+  const response = await fetch(`/api/generate-classroom/${encodeURIComponent(id)}/retry`, {
+    method: 'POST',
+    cache: 'no-store',
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || `Retry failed (${response.status})`);
+  return result;
 }
 
 const progressPath = (id: string) => `/api/account/courses/${encodeURIComponent(id)}/progress`;

@@ -8,6 +8,7 @@ import { listStages, loadStageData, type StageListItem } from '@/lib/utils/stage
 import { loadCursor } from '@/lib/playback/cursor';
 import { isWorkerAccountEnabled } from '@/lib/classroom/worker-account';
 import { fetchClassroomFromApi } from '@/lib/classroom/load-classroom';
+import { GenerationJobs } from '@/components/learning/GenerationJobs';
 
 type LearningPosition = { scene: number; total: number } | null;
 
@@ -23,7 +24,7 @@ const copy = {
     continue: '继续学习',
     create: '创建新课程',
     library: '课程库',
-    empty: '还没有课程。输入一个主题或上传资料，创建你的第一堂 AI 课。',
+    empty: '还没有已完成的课程。输入一个主题或上传资料，创建你的第一堂 AI 课。',
     retry: '课程加载失败，请刷新后重试。',
     loading: '正在加载课程…',
     page: (scene: number, total: number) => `第 ${scene} / ${total} 页`,
@@ -41,7 +42,8 @@ const copy = {
     continue: 'Continue learning',
     create: 'Create a course',
     library: 'Course library',
-    empty: 'No courses yet. Enter a topic or upload materials to create your first AI class.',
+    empty:
+      'No completed courses yet. Enter a topic or upload materials to create your first AI class.',
     retry: 'Could not load your courses. Refresh to try again.',
     loading: 'Loading courses…',
     page: (scene: number, total: number) => `Page ${scene} of ${total}`,
@@ -203,6 +205,7 @@ export default function LearnPage() {
             </section>
           </>
         )}
+        {isWorkerAccountEnabled() && <GenerationJobs chinese={locale.startsWith('zh')} />}
       </div>
     </main>
   );

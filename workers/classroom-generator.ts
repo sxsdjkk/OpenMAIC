@@ -2,6 +2,7 @@ import {
   runClassroomQueueTask,
   type ClassroomStartTask,
   type ClassroomStepTask,
+  type ClassroomRetryTask,
 } from '../lib/server/classroom-queue-generation';
 import {
   markClassroomGenerationJobFailed,
@@ -17,10 +18,13 @@ import {
 import { POST as generateTTS } from '../app/api/generate/tts/route';
 import type { ExportedHandler, GeneratorEnv, Message, Queue } from './generator-env';
 import { linkLegacyAccount, type LegacyAccountTask } from '../lib/server/worker-account-migration';
+import { indexAccountJob } from '../lib/server/worker-generation-jobs';
 
 type ClassroomQueueMessage =
   | ClassroomStartTask
   | ClassroomStepTask
+  | ClassroomRetryTask
+  | { kind: 'index-account-job'; ownerId: string; jobId: string }
   | LegacyAccountTask
   | { kind: 'publish-classroom'; classroomId: string }
   | { kind: 'tts'; jobId: string; body: string };
@@ -46,7 +50,16 @@ const classroomGenerator = {
   ) {
     for (const message of batch.messages) {
       try {
-        if ('kind' in message.body && message.body.kind !== 'classroom-step') {
+        if (
+          'kind' in message.body &&
+          message.body.kind !== 'classroom-step' &&
+          message.body.kind !== 'classroom-retry'
+        ) {
+          if (message.body.kind === 'index-account-job') {
+            await indexAccountJob(env.CLASSROOM_BUCKET, message.body.ownerId, message.body.jobId);
+            message.ack();
+            continue;
+          }
           if (message.body.kind === 'link-legacy-account') {
             await linkLegacyAccount(env.CLASSROOM_BUCKET, message.body);
             message.ack();
@@ -87,8 +100,9 @@ const classroomGenerator = {
           JSON.stringify({
             message: 'Classroom task committed',
             jobId: task.jobId,
-            phase: 'kind' in task ? task.phase : 'plan',
-            index: 'kind' in task ? task.index : 0,
+            phase:
+              'kind' in task ? (task.kind === 'classroom-step' ? task.phase : 'retry') : 'plan',
+            index: 'kind' in task && task.kind === 'classroom-step' ? task.index : 0,
           }),
         );
         message.ack();
@@ -101,7 +115,11 @@ const classroomGenerator = {
           }),
         );
         const body = message.body;
-        if (!('kind' in body) || body.kind === 'classroom-step') {
+        if (
+          !('kind' in body) ||
+          body.kind === 'classroom-step' ||
+          body.kind === 'classroom-retry'
+        ) {
           await runWithClassroomBucket(env.CLASSROOM_BUCKET, async () => {
             const job = await readClassroomGenerationJob(body.jobId);
             if (!job || job.status === 'succeeded' || job.status === 'failed') return;

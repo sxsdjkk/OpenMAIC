@@ -10,13 +10,17 @@ import {
   ensureClassroomJobsDir,
   readClassroomJsonFile,
   writeJsonFileAtomic,
+  getClassroomBucket,
 } from '@/lib/server/classroom-storage';
+import { indexGenerationJob } from './worker-generation-jobs';
 
 export type ClassroomGenerationJobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 
 export interface ClassroomGenerationJob {
   id: string;
   ownerId?: string;
+  retryable?: boolean;
+  retryCount?: number;
   status: ClassroomGenerationJobStatus;
   step: ClassroomGenerationStep | 'queued' | 'failed';
   progress: number;
@@ -47,6 +51,12 @@ export interface ClassroomGenerationJob {
 
 function jobFilePath(jobId: string) {
   return path.join(CLASSROOM_JOBS_DIR, `${jobId}.json`);
+}
+
+async function saveJob(job: ClassroomGenerationJob) {
+  await writeJsonFileAtomic(jobFilePath(job.id), job);
+  if (process.env.CLOUDFLARE_WORKERS === '1' && job.ownerId)
+    await indexGenerationJob(await getClassroomBucket(), job);
 }
 
 function buildInputSummary(input: GenerateClassroomInput): ClassroomGenerationJob['inputSummary'] {
@@ -120,7 +130,7 @@ export async function createClassroomGenerationJob(
   };
 
   await ensureClassroomJobsDir();
-  await writeJsonFileAtomic(jobFilePath(jobId), job);
+  await saveJob(job);
   return job;
 }
 
@@ -147,7 +157,7 @@ export async function updateClassroomGenerationJob(
       updatedAt: new Date().toISOString(),
     };
 
-    await writeJsonFileAtomic(jobFilePath(jobId), updated);
+    await saveJob(updated);
     return updated;
   });
 }
@@ -169,7 +179,7 @@ export async function markClassroomGenerationJobRunning(
       updatedAt: new Date().toISOString(),
     };
 
-    await writeJsonFileAtomic(jobFilePath(jobId), updated);
+    await saveJob(updated);
     return updated;
   });
 }

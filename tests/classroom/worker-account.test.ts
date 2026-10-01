@@ -1,5 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { listCloudCourses, loadCloudCursor, saveCloudCursor } from '@/lib/classroom/worker-account';
+import {
+  listCloudCourses,
+  listCloudGenerationJobs,
+  retryCloudGenerationJob,
+  loadCloudCursor,
+  saveCloudCursor,
+} from '@/lib/classroom/worker-account';
 import { loadCursor, saveCursor, clearCursor } from '@/lib/playback/cursor';
 
 afterEach(() => {
@@ -48,4 +54,32 @@ it('imports local progress only-if-absent rather than overwriting a concurrent c
   await saveCloudCursor('course1', cursor, true);
   expect(fetch.mock.calls[0][1].headers['If-None-Match']).toBe('*');
   expect(await loadCloudCursor('course1')).toEqual(cursor);
+});
+
+it('paginates generation history and submits retries without client ownership or provider keys', async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json({ jobs: [{ id: 'old', updatedAt: '2026-09-29T00:00:00Z' }], cursor: 'next' }),
+    )
+    .mockResolvedValueOnce(
+      Response.json({ jobs: [{ id: 'new', updatedAt: '2026-09-30T00:00:00Z' }], cursor: null }),
+    )
+    .mockResolvedValueOnce(Response.json({ jobId: 'new' }, { status: 202 }));
+  vi.stubGlobal('fetch', fetch);
+  expect((await listCloudGenerationJobs()).map((job) => job.id)).toEqual(['new', 'old']);
+  expect(fetch.mock.calls[1][0]).toContain('cursor=next');
+  expect(await retryCloudGenerationJob('new')).toEqual({ jobId: 'new' });
+  expect(fetch.mock.calls[2]).toEqual([
+    '/api/generate-classroom/new/retry',
+    { method: 'POST', cache: 'no-store' },
+  ]);
+});
+
+it('surfaces retry failures rather than treating a rejected task as submitted', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(Response.json({ error: '请重新创建课程' }, { status: 409 })),
+  );
+  await expect(retryCloudGenerationJob('old')).rejects.toThrow('请重新创建课程');
 });

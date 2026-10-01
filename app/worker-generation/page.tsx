@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { LoaderCircle, Check, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import styles from './progress.module.css';
+import { RetryGenerationButton } from '@/components/learning/GenerationJobs';
 
 const steps = [
   { label: '生成大纲', stages: ['queued', 'initializing', 'researching', 'generating_outlines'] },
@@ -19,6 +20,7 @@ export default function WorkerGenerationPage() {
   const [stage, setStage] = useState('queued');
   const [counts, setCounts] = useState({ scenes: 0, totalScenes: 0, audio: 0, totalAudio: 0 });
   const [complete, setComplete] = useState(false);
+  const [retryJobId, setRetryJobId] = useState<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -44,6 +46,7 @@ export default function WorkerGenerationPage() {
           setComplete(true);
           window.location.replace(`/classroom/${encodeURIComponent(job.result.classroomId)}`);
         } else if (job.status === 'failed') {
+          if (job.canRetry) setRetryJobId(jobId);
           throw new Error(job.error || '课程生成失败');
         } else {
           timer = setTimeout(poll, 5000);
@@ -132,13 +135,18 @@ export default function WorkerGenerationPage() {
         <p className="mt-3 text-xs text-muted-foreground">
           百分比根据已完成的任务更新。等待模型响应时，动效表示任务仍在进行。
         </p>
+        {failed && retryJobId && (
+          <div className="mt-6">
+            <RetryGenerationButton jobId={retryJobId} />
+          </div>
+        )}
       </div>
       <Link
         className="mt-6 inline-block text-sm text-violet-600 hover:underline"
-        href="/"
+        href="/learn"
         prefetch={false}
       >
-        返回学习平台
+        返回我的课程
       </Link>
     </main>
   );

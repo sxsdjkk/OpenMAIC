@@ -21,6 +21,12 @@ import {
   validProgress,
   type AccountBucket,
 } from '../lib/server/worker-accounts';
+import {
+  canRetryGenerationJob,
+  indexGenerationJob,
+  listGenerationJobs,
+} from '../lib/server/worker-generation-jobs';
+import { isGenerationJobStale, STALE_GENERATION_ERROR } from '../lib/classroom/generation-job';
 
 interface WebEnv {
   CLASSROOM_BUCKET: AccountBucket;
@@ -112,6 +118,7 @@ async function createJob(request: Request, env: WebEnv, url: URL, ownerId: strin
   const job: ClassroomGenerationJob = {
     id: jobId,
     ownerId,
+    retryable: true,
     status: 'queued',
     step: 'queued',
     progress: 0,
@@ -126,19 +133,20 @@ async function createJob(request: Request, env: WebEnv, url: URL, ownerId: strin
     },
     scenesGenerated: 0,
   };
+  await env.CLASSROOM_BUCKET.put(
+    `jobs/${jobId}/input.json`,
+    JSON.stringify({ input, baseUrl: url.origin }),
+  );
   await env.CLASSROOM_BUCKET.put(`jobs/${jobId}.json`, JSON.stringify(job));
+  await indexGenerationJob(env.CLASSROOM_BUCKET, job);
   try {
     await env.CLASSROOM_QUEUE.send({ jobId, input, baseUrl: url.origin });
   } catch {
-    await env.CLASSROOM_BUCKET.put(
-      `jobs/${jobId}.json`,
-      JSON.stringify({
-        ...job,
-        status: 'failed',
-        step: 'failed',
-        error: 'Queue submission failed',
-      }),
-    );
+    job.status = 'failed';
+    job.step = 'failed';
+    job.error = 'Queue submission failed';
+    await env.CLASSROOM_BUCKET.put(`jobs/${jobId}.json`, JSON.stringify(job));
+    await indexGenerationJob(env.CLASSROOM_BUCKET, job);
     return apiError('INTERNAL_ERROR', 503, 'Queue submission failed');
   }
   return apiSuccess(
@@ -150,6 +158,62 @@ async function createJob(request: Request, env: WebEnv, url: URL, ownerId: strin
     },
     202,
   );
+}
+
+async function retryJob(env: WebEnv, id: string, ownerId: string) {
+  const key = `jobs/${id}.json`;
+  const object = await env.CLASSROOM_BUCKET.get(key);
+  if (!object) return apiError('INVALID_REQUEST', 404, 'Job not found');
+  const job = JSON.parse(await object.text()) as ClassroomGenerationJob;
+  if (job.ownerId !== ownerId) return apiError('INVALID_REQUEST', 404, 'Job not found');
+  if (job.status === 'succeeded')
+    return apiError('INVALID_REQUEST', 409, 'Course is already complete');
+  const accepted = () => apiSuccess({ jobId: id, pollUrl: `/api/generate-classroom/${id}` }, 202);
+  if (job.status !== 'failed' && !isGenerationJobStale(job)) return accepted();
+  if (!(await canRetryGenerationJob(env.CLASSROOM_BUCKET, id)))
+    return apiError('INVALID_REQUEST', 409, '历史任务未保存完整需求或断点，请重新创建课程');
+  const queued: ClassroomGenerationJob = {
+    ...job,
+    status: 'queued',
+    step: 'queued',
+    message: '重试已提交，等待继续生成',
+    error: undefined,
+    completedAt: undefined,
+    updatedAt: new Date().toISOString(),
+    retryable: true,
+    retryCount: (job.retryCount || 0) + 1,
+  };
+  const saved = await env.CLASSROOM_BUCKET.put(key, JSON.stringify(queued), {
+    onlyIf: new Headers({ 'If-Match': `"${object.etag}"` }),
+  });
+  if (!saved) return apiError('INVALID_REQUEST', 409, '任务状态已更新，请刷新后重试');
+  try {
+    await indexGenerationJob(env.CLASSROOM_BUCKET, queued);
+    await env.CLASSROOM_QUEUE.send({
+      kind: 'classroom-retry',
+      jobId: id,
+      attempt: queued.retryCount,
+    });
+  } catch {
+    // Do not undo a newer consumer update if dispatch had an uncertain outcome.
+    const current = await env.CLASSROOM_BUCKET.get(key);
+    const state = current ? (JSON.parse(await current.text()) as ClassroomGenerationJob) : null;
+    if (state?.status === 'queued' && state.retryCount === queued.retryCount) {
+      const failed: ClassroomGenerationJob = {
+        ...queued,
+        status: 'failed',
+        error: '重试任务提交失败，请稍后再试',
+      };
+      if (
+        await env.CLASSROOM_BUCKET.put(key, JSON.stringify(failed), {
+          onlyIf: new Headers({ 'If-Match': `"${current!.etag}"` }),
+        })
+      )
+        await indexGenerationJob(env.CLASSROOM_BUCKET, failed);
+    }
+    return apiError('INTERNAL_ERROR', 503, '重试任务提交失败，请稍后再试');
+  }
+  return accepted();
 }
 
 async function queuedTTS(request: Request, env: WebEnv) {
@@ -203,6 +267,12 @@ async function route(request: Request, env: WebEnv): Promise<Response> {
     const cursor = url.searchParams.get('cursor') || undefined;
     if (cursor && cursor.length > 2048) return apiError('INVALID_REQUEST', 400, 'Invalid cursor');
     return apiSuccess(await listAccountCourses(env.CLASSROOM_BUCKET, ownerId, cursor));
+  }
+  if (pathname === '/api/account/jobs' && request.method === 'GET') {
+    if (!ownerId) return apiError('UNAUTHENTICATED', 401, 'Feishu login required');
+    const cursor = url.searchParams.get('cursor') || undefined;
+    if (cursor && cursor.length > 2048) return apiError('INVALID_REQUEST', 400, 'Invalid cursor');
+    return apiSuccess(await listGenerationJobs(env.CLASSROOM_BUCKET, ownerId, cursor));
   }
   const progressPath = /^\/api\/account\/courses\/([\w-]{1,64})\/progress$/.exec(pathname);
   if (progressPath) {
@@ -286,6 +356,11 @@ async function route(request: Request, env: WebEnv): Promise<Response> {
     return ownerId
       ? createJob(request, env, url, ownerId)
       : apiError('UNAUTHENTICATED', 401, 'Feishu login required');
+  const retryPath = /^\/api\/generate-classroom\/([a-zA-Z0-9_-]{1,64})\/retry$/.exec(pathname);
+  if (retryPath && request.method === 'POST')
+    return ownerId
+      ? retryJob(env, retryPath[1], ownerId)
+      : apiError('UNAUTHENTICATED', 401, 'Feishu login required');
   const jobPath = /^\/api\/generate-classroom\/([a-zA-Z0-9_-]{1,64})$/.exec(pathname);
   if (jobPath && request.method === 'GET') {
     const object = await env.CLASSROOM_BUCKET.get(`jobs/${jobPath[1]}.json`);
@@ -294,10 +369,10 @@ async function route(request: Request, env: WebEnv): Promise<Response> {
     if (!ownerId || job.ownerId !== ownerId)
       return apiError('INVALID_REQUEST', 404, 'Job not found');
     // A hard runtime termination cannot write a failure. Do not animate/poll forever.
-    if (job.status === 'running' && Date.now() - Date.parse(job.updatedAt) > 30 * 60_000) {
+    if (isGenerationJobStale(job)) {
       job.status = 'failed';
       job.step = 'failed';
-      job.error = '生成任务长时间没有进展，可能已中断，请重新生成。';
+      job.error = STALE_GENERATION_ERROR;
       job.message = job.error;
     }
     return apiSuccess({
@@ -305,6 +380,8 @@ async function route(request: Request, env: WebEnv): Promise<Response> {
       jobId: job.id,
       done: job.status === 'succeeded' || job.status === 'failed',
       pollIntervalMs: 5000,
+      canRetry:
+        job.status === 'failed' && (await canRetryGenerationJob(env.CLASSROOM_BUCKET, jobPath[1])),
     });
   }
   if (pathname === '/api/classroom' && request.method === 'GET') {

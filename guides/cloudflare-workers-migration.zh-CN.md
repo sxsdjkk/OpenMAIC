@@ -182,3 +182,23 @@ Workers 类型由 Wrangler 生成，`workers/generator-env.d.ts` 导出必要类
 - `VERIFICATION_TARGET`: `/learn`、Transformer 课堂 `ZQZC4Lwc9l`、已存在的课堂/音频/任务/进度接口。
 - `VERIFICATION_EVIDENCE`: 真实学习空间显示 4 门课程、14 页；暂停手动换至第 2/11 页，R2 游标实际保存第二页，新标签页恢复到第二页；验收后还原到原第一页面。最终发布后刷新课程目录正常，再次校验全部 18 条迁移记录的归属、回执与数据保留通过。`/private/tmp/learning-account-isolation.mjs` 两轮复测通过：测试账号目录为空，旧课堂、已有音频、任务和进度及 4 类接口路径变体均返回 404，且来自 lite 入口；匿名列表 401。截图 `/private/tmp/learning-account-resume.png`、`/private/tmp/learning-account-courses.png`，云端游标核对 `/private/tmp/learning-account-progress-second-page.json` 和 `/private/tmp/learning-account-progress-restored.json`。
 - `VERIFICATION_GAPS`: 发布后首轮大小写变体出现一次 500，随后两轮均为 404，未返回课程内容；没有足够运行日志判断该瞬时错误原因，也未进行高并发或免费档 CPU 负载验收。没有在另一台设备执行新的飞书扫码授权；同账号跨设备契约由云端接口、无本地目录依赖的回归和新标签页实测覆盖。本轮不执行模型/语音生成或完整长课负载，之前失败长课仍不提供自动恢复。文件夹、聊天、笔记、课件编辑和本地删除不是本次云端同步范围；旧本地缓存保留，刷新页面即可使用新版。临时目录证据不是永久云端存档。
+
+## 失败课程记录与断点重试（2026-10-02）
+
+按用户要求在 `/learn` 增加“生成记录”，显示当前账号失败、排队和生成中的任务，包括失败原因、实际进度、已保存课件和语音计数。完整课程仍单独进入课程库，失败占位不计入已完成课程数量。运行中自动刷新，全部失败后停止轮询；生成进度页也提供失败重试入口。
+
+- `accounts/<account>/jobs/<jobId>.json` 保存有长度上限的摘要和 R2 元数据；列表按账号前缀分页，每页最多 100 条，不解析大课件或检查点。后续状态更新同步摘要，已成功记录从生成列表过滤。
+- 新任务先保存完整输入到 `jobs/<jobId>/input.json`，再派发 Queue；失败于大纲之前也可用原始输入重试，不能用截断的需求预览替代原文。服务密钥不写入输入或摘要。
+- `POST /api/generate-classroom/<jobId>/retry` 仅允许已验证的所属账号操作失败或超过 30 分钟无进展的任务。重试先用 R2 ETag 条件写入排队状态，再发独立 `classroom-retry` 消息；重复点击和并发竞争不会重复派发。失败派发只在状态尚未被消费者更新时回退，旧重试消息通过 attempt 标记拒绝执行。
+- 有检查点时只发送保存的下一步，保留课程 ID、大纲、场景和已保存音频；没有检查点但有完整输入时重新运行大纲。两者都没有的旧任务显示“重新创建课程”，不伪装成可恢复。每片段的自动重试上限和 Queue 单消费者配置保持不变；上游供应商再次失败时仍会明确失败，不保证免费语音额度或最终完成。
+- 使用管理员脚本的 `index-jobs` 模式，对原迁移清单中的 9 条已归属任务发送摘要索引消息；消费者再次检查所属账号，不改绑，也不重写旧任务或课件。索引后原 18 条迁移记录的数据保留与归属校验全部通过。真实页面初始显示 4 门完整课程、14 页和 5 条失败记录，其中 4 条有检查点可重试，1 条历史任务缺少完整输入和检查点。
+
+网页已发布 `fc36f271-608a-4d4f-8d9c-a6014403f2e4`，生成器已发布 `af396227-cf02-40bc-8df1-d0d0f12645f3`；私有兼容 Worker 保持 `7ed74aee-c53c-45b6-9055-f694e9d1d351`。沿用现有 R2、Queue 和 Secret，不新增付费资源、不升级套餐、不改语音模型或音色。
+
+179 项相关回归、应用类型检查、ESLint 零错误和 Next/OpenNext 构建通过；原有构建诊断及匿名默认导出警告未扩展修复。10689 个发布相关文件扫描未发现 7 项候选服务/飞书密钥值。
+
+- `VERIFICATION_TOOL`: Codex In-app Browser / CUA；独立测试会话 HTTP 和只读 R2 校验。
+- `VERIFICATION_REASON`: 复用真实飞书登录会话检查列表和点击重试，验证实际 Queue 接续及保留数据；独立身份验证隔离。
+- `VERIFICATION_TARGET`: `/learn`、任务 `489def1e-0218-471e-bac9-533bfba83a73` 的重试及进度页、跨账号生成记录和重试接口。
+- `VERIFICATION_EVIDENCE`: 页面显示 5 条失败记录和 4 个“重试生成”按钮。实际点击指定的 11 页论文课程后进入“语音 1/68”，R2 任务为 running、retryCount=1；大纲、原始输入、11 个场景 ID、检查点和课程 ID `JU5Ctk9CDT` 均保持不变，未重做课件。片段自动重试耗尽后再次进入 failed、0/68，进度页恢复“重试生成”按钮；最终检查点与原始输入仍保持相同哈希。独立账号生成列表为空，已知课程/媒体/任务/进度及重试和路径别名均返回 404，匿名列表及重试为 401。截图 `/private/tmp/learning-failed-courses.png`、`/private/tmp/learning-retry-progress.png`、`/private/tmp/learning-retry-failed.png`，数据摘要 `/private/tmp/learning-retry-before.json`、`/private/tmp/learning-retry-after.json` 与 `/private/tmp/learning-retry-final.json`。
+- `VERIFICATION_GAPS`: 网络曾在应用响应前短暂断开，恢复后页面及 HTTP 验收通过。重试入口和断点接续已实测，但该课程语音合成仍失败，未完成 68 段语音；本轮没有改动 TTS 配置或调查片段失败的具体上游原因，也未进行高并发或 CPU 负载验收。1 条无完整输入/检查点的历史任务无法原地恢复。临时目录证据不是永久云端存档。

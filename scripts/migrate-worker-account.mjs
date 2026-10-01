@@ -4,12 +4,12 @@ import { createHash } from 'node:crypto';
 // Explicit target from /account in the authenticated browser. No automatic "first login" claims.
 const [mode, ownerId, manifestPath] = process.argv.slice(2);
 if (
-  !['inspect', 'enqueue', 'verify'].includes(mode) ||
+  !['inspect', 'enqueue', 'verify', 'index-jobs'].includes(mode) ||
   !/^[a-f0-9]{64}$/.test(ownerId || '') ||
   !manifestPath
 )
   throw new Error(
-    'Usage: node scripts/migrate-worker-account.mjs inspect|enqueue|verify ACCOUNT_ID MANIFEST_PATH',
+    'Usage: node scripts/migrate-worker-account.mjs inspect|enqueue|verify|index-jobs ACCOUNT_ID MANIFEST_PATH',
   );
 const token = readFileSync(
   '/Users/keke/Library/Preferences/.wrangler/config/default.toml',
@@ -96,14 +96,16 @@ if (mode === 'inspect') {
 } else {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   if (manifest.ownerId !== ownerId) throw new Error('Manifest account mismatch');
-  const records = manifest.records.filter((r) => r.eligible);
-  if (mode === 'enqueue') {
+  const records = manifest.records.filter(
+    (r) => r.eligible && (mode !== 'index-jobs' || r.type === 'job'),
+  );
+  if (mode === 'enqueue' || mode === 'index-jobs') {
     const queues = await (await api('/queues?per_page=100')).json();
     const queue = queues.result.find((q) => q.queue_name === 'ai-learning-agent-generation');
     if (!queue) throw new Error('Existing classroom Queue not found');
     for (const record of records) {
       const body = {
-        kind: 'link-legacy-account',
+        kind: mode === 'index-jobs' ? 'index-account-job' : 'link-legacy-account',
         ownerId,
         [record.type === 'course' ? 'classroomId' : 'jobId']: record.id,
       };

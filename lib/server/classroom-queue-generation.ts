@@ -37,6 +37,12 @@ export interface ClassroomStepTask {
   index: number;
 }
 
+export interface ClassroomRetryTask {
+  kind: 'classroom-retry';
+  jobId: string;
+  attempt: number;
+}
+
 interface Checkpoint {
   input: GenerateClassroomInput;
   baseUrl: string;
@@ -51,7 +57,7 @@ type QueueProducer = Pick<Queue<ClassroomStepTask>, 'send'>;
 
 /** One bounded phase per message. The consumer is configured with concurrency=1. */
 export async function runClassroomQueueTask(
-  task: ClassroomStartTask | ClassroomStepTask,
+  task: ClassroomStartTask | ClassroomStepTask | ClassroomRetryTask,
   bucket: ClassroomBucket,
   queue: QueueProducer,
 ) {
@@ -59,6 +65,28 @@ export async function runClassroomQueueTask(
   if (!job || job.status === 'succeeded' || job.status === 'failed') return;
   const key = `jobs/${task.jobId}/checkpoint.json`;
   const saved = await bucket.get(key);
+  if ('kind' in task && task.kind === 'classroom-retry') {
+    if (task.attempt !== job.retryCount) return;
+    if (saved) {
+      const checkpoint = JSON.parse(await saved.text()) as Checkpoint;
+      if (!checkpoint.next) throw new Error('断点没有待执行步骤，请重新创建课程');
+      if (job.ownerId) await claimCourse(bucket, job.ownerId, checkpoint.plan.stage.id);
+      await updateClassroomGenerationJob(task.jobId, {
+        status: 'running',
+        message: '正在从已保存的断点继续生成',
+      });
+      await queue.send(checkpoint.next);
+    } else {
+      const input = await bucket.get(`jobs/${task.jobId}/input.json`);
+      if (!input) throw new Error('历史任务未保存完整需求，请重新创建课程');
+      await runClassroomQueueTask(
+        { ...JSON.parse(await input.text()), jobId: task.jobId } as ClassroomStartTask,
+        bucket,
+        queue,
+      );
+    }
+    return;
+  }
   let checkpoint: Checkpoint;
   const step = (phase: ClassroomStepTask['phase'], index = 0): ClassroomStepTask => ({
     kind: 'classroom-step',

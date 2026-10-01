@@ -133,7 +133,18 @@ describe('lightweight Workers entry', () => {
       baseUrl: 'https://example.com',
     });
     expect(JSON.stringify(env.CLASSROOM_QUEUE.send.mock.calls)).not.toContain('do-not-forward');
-    expect(JSON.parse(env.CLASSROOM_BUCKET.put.mock.calls[0][1]).ownerId).toBe(ownerId);
+    const savedJob = env.CLASSROOM_BUCKET.put.mock.calls.find(
+      ([key]) => key === `jobs/${job.jobId}.json`,
+    )!;
+    expect(JSON.parse(savedJob[1]).ownerId).toBe(ownerId);
+    const savedInput = env.CLASSROOM_BUCKET.put.mock.calls.find(
+      ([key]) => key === `jobs/${job.jobId}/input.json`,
+    )!;
+    expect(JSON.parse(savedInput[1])).toEqual({
+      input: env.CLASSROOM_QUEUE.send.mock.calls[0][0].input,
+      baseUrl: 'https://example.com',
+    });
+    expect(savedInput[1]).not.toContain('do-not-forward');
     expect(env.CLASSROOM_BUCKET.put).toHaveBeenCalledWith(
       `jobs/${job.jobId}.json`,
       expect.any(String),
@@ -168,7 +179,11 @@ describe('lightweight Workers entry', () => {
         )
       ).status,
     ).toBe(503);
-    expect(JSON.parse(env.CLASSROOM_BUCKET.put.mock.calls[1][1]).status).toBe('failed');
+    const savedJobs = env.CLASSROOM_BUCKET.put.mock.calls.filter(([key]) =>
+      /^jobs\/[^/]+\.json$/.test(key),
+    );
+    expect(JSON.parse(savedJobs.at(-1)![1]).status).toBe('failed');
+    expect(JSON.parse(env.CLASSROOM_BUCKET.put.mock.calls.at(-1)![1]).status).toBe('failed');
   });
 
   it('reads small job status objects without running the generation code', async () => {
@@ -361,6 +376,183 @@ describe('lightweight Workers entry', () => {
       expect((await worker.fetch(request(path), env)).status).toBe(404);
     }
     expect(env.LEGACY_APP.fetch).not.toHaveBeenCalled();
+  });
+
+  function retryRecord(overrides = {}) {
+    let state = {
+      id: 'job1',
+      ownerId,
+      status: 'failed',
+      step: 'failed',
+      progress: 84,
+      scenesGenerated: 12,
+      ttsGenerated: 39,
+      totalTts: 80,
+      inputSummary: { requirementPreview: 'Python 长课' },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      error: '第 5 节语音失败',
+      ...overrides,
+    };
+    let etag = 1;
+    env.CLASSROOM_BUCKET.get.mockImplementation(async (key: string) =>
+      key === 'jobs/job1.json'
+        ? { text: async () => JSON.stringify(state), etag: String(etag) }
+        : null,
+    );
+    env.CLASSROOM_BUCKET.head.mockImplementation(async (key: string) =>
+      key === 'jobs/job1/checkpoint.json' ? { size: 500000 } : null,
+    );
+    env.CLASSROOM_BUCKET.put.mockImplementation(async (key, value, options) => {
+      if (key === 'jobs/job1.json') {
+        if (options?.onlyIf?.get('if-match') !== `"${etag}"`) return null;
+        state = JSON.parse(value);
+        etag += 1;
+      }
+      return {};
+    });
+    return { read: () => state };
+  }
+
+  it('retries only the owned failed job, atomically retaining its checkpoint and counts', async () => {
+    const record = retryRecord();
+    const response = await worker.fetch(
+      request('/api/generate-classroom/job1/retry', { method: 'POST' }),
+      env,
+    );
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({ jobId: 'job1' });
+    expect(record.read()).toMatchObject({
+      status: 'queued',
+      retryCount: 1,
+      scenesGenerated: 12,
+      ttsGenerated: 39,
+      progress: 84,
+    });
+    expect(record.read().error).toBeUndefined();
+    expect(env.CLASSROOM_QUEUE.send).toHaveBeenCalledExactlyOnceWith({
+      kind: 'classroom-retry',
+      jobId: 'job1',
+      attempt: 1,
+    });
+    expect(env.CLASSROOM_BUCKET.get.mock.calls.every(([key]) => key === 'jobs/job1.json')).toBe(
+      true,
+    );
+    expect(
+      env.CLASSROOM_BUCKET.put.mock.calls.every(
+        ([key]) => !key.includes('/checkpoint') && !key.startsWith('classrooms/'),
+      ),
+    ).toBe(true);
+    expect(
+      (await worker.fetch(request('/api/generate-classroom/job1/retry', { method: 'POST' }), env))
+        .status,
+    ).toBe(202);
+    expect(env.CLASSROOM_QUEUE.send).toHaveBeenCalledOnce();
+  });
+
+  it('rejects concurrent retry claims without dispatching duplicate tasks', async () => {
+    retryRecord();
+    env.CLASSROOM_BUCKET.put.mockResolvedValueOnce(null);
+    expect(
+      (await worker.fetch(request('/api/generate-classroom/job1/retry', { method: 'POST' }), env))
+        .status,
+    ).toBe(409);
+    expect(env.CLASSROOM_QUEUE.send).not.toHaveBeenCalled();
+  });
+
+  it('refuses complete, foreign, anonymous, cross-origin and unrecoverable legacy retries', async () => {
+    for (const [overrides, status] of [
+      [{ status: 'succeeded' }, 409],
+      [{ ownerId: 'other' }, 404],
+      [{}, 409],
+    ] as const) {
+      retryRecord(overrides);
+      env.CLASSROOM_BUCKET.head.mockResolvedValue(null);
+      expect(
+        (await worker.fetch(request('/api/generate-classroom/job1/retry', { method: 'POST' }), env))
+          .status,
+      ).toBe(status);
+    }
+    expect(
+      (
+        await worker.fetch(
+          new Request('https://example.com/api/generate-classroom/job1/retry', { method: 'POST' }),
+          env,
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await worker.fetch(
+          request('/api/generate-classroom/job1/retry', {
+            method: 'POST',
+            headers: { origin: 'https://foreign.com' },
+          }),
+          env,
+        )
+      ).status,
+    ).toBe(403);
+    expect(env.CLASSROOM_QUEUE.send).not.toHaveBeenCalled();
+    expect(env.CLASSROOM_BUCKET.put).not.toHaveBeenCalled();
+  });
+
+  it('allows stalled legacy jobs to resume only when a checkpoint or complete input exists', async () => {
+    retryRecord({ status: 'running', updatedAt: new Date(Date.now() - 31 * 60_000).toISOString() });
+    env.CLASSROOM_BUCKET.head.mockImplementation(async (key) =>
+      key === 'jobs/job1/input.json' ? { size: 100 } : null,
+    );
+    expect(
+      (await worker.fetch(request('/api/generate-classroom/job1/retry', { method: 'POST' }), env))
+        .status,
+    ).toBe(202);
+    expect(env.CLASSROOM_QUEUE.send).toHaveBeenCalledOnce();
+  });
+
+  it('makes a rejected queue submission retryable again without losing prior generation', async () => {
+    const record = retryRecord();
+    env.CLASSROOM_QUEUE.send.mockRejectedValueOnce(new Error('queue down'));
+    expect(
+      (await worker.fetch(request('/api/generate-classroom/job1/retry', { method: 'POST' }), env))
+        .status,
+    ).toBe(503);
+    expect(record.read()).toMatchObject({
+      status: 'failed',
+      scenesGenerated: 12,
+      ttsGenerated: 39,
+      retryCount: 1,
+    });
+    expect(
+      (await worker.fetch(request('/api/generate-classroom/job1/retry', { method: 'POST' }), env))
+        .status,
+    ).toBe(202);
+    expect(record.read()).toMatchObject({ status: 'queued', retryCount: 2 });
+  });
+
+  it('does not roll back a newer consumer update after an uncertain queue result', async () => {
+    const record = retryRecord();
+    env.CLASSROOM_QUEUE.send.mockImplementationOnce(async () => {
+      const current = record.read();
+      current.status = 'running';
+      throw new Error('uncertain dispatch');
+    });
+    expect(
+      (await worker.fetch(request('/api/generate-classroom/job1/retry', { method: 'POST' }), env))
+        .status,
+    ).toBe(503);
+    expect(record.read().status).toBe('running');
+  });
+
+  it('lists generation records with an account prefix and rejects oversized cursors', async () => {
+    expect((await worker.fetch(request('/api/account/jobs?cursor=next'), env)).status).toBe(200);
+    expect(env.CLASSROOM_BUCKET.list).toHaveBeenCalledWith({
+      prefix: `accounts/${ownerId}/jobs/`,
+      include: ['customMetadata'],
+      limit: 100,
+      cursor: 'next',
+    });
+    expect(
+      (await worker.fetch(request(`/api/account/jobs?cursor=${'x'.repeat(2049)}`), env)).status,
+    ).toBe(400);
   });
 
   it('preserves TTS provider errors and bounds waiting for Queue', async () => {

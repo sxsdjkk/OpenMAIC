@@ -21,6 +21,7 @@ for (const key of Object.keys(buildEnv)) {
   if (/(?:API_KEY|SECRET|TOKEN|PASSWORD|PRIVATE_KEY)$/.test(key)) delete buildEnv[key];
 }
 buildEnv.CLOUDFLARE_WORKERS = '1';
+buildEnv.NEXT_PUBLIC_WORKERS_ACCOUNT = '1';
 
 function run(binary, args) {
   const result = spawnSync(path.join(root, 'node_modules', '.bin', binary), args, {

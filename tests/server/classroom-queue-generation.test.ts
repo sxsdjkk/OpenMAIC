@@ -15,6 +15,7 @@ vi.mock('@/lib/server/classroom-media-generation', () => ({
 }));
 vi.mock('@/lib/server/classroom-storage', () => ({ persistClassroom: vi.fn() }));
 vi.mock('@/lib/server/provider-config', () => ({ getServerTTSProviders: vi.fn() }));
+vi.mock('@/lib/server/worker-accounts', () => ({ claimCourse: vi.fn(), registerCourse: vi.fn() }));
 vi.mock('@/lib/server/classroom-job-store', () => ({
   readClassroomGenerationJob: vi.fn(),
   updateClassroomGenerationJob: vi.fn(),
@@ -37,6 +38,7 @@ import {
 } from '@/lib/server/classroom-media-generation';
 import { persistClassroom } from '@/lib/server/classroom-storage';
 import { getServerTTSProviders } from '@/lib/server/provider-config';
+import { claimCourse, registerCourse } from '@/lib/server/worker-accounts';
 import {
   readClassroomGenerationJob,
   updateClassroomGenerationJob,
@@ -162,6 +164,29 @@ describe('checkpointed classroom Queue tasks', () => {
     expect(checkpoint().scenes).toHaveLength(1);
     expect(queue.send).toHaveBeenLastCalledWith(
       expect.objectContaining({ phase: 'scene', index: 1 }),
+    );
+  });
+
+  it('carries the verified job owner into course ownership and catalog before completion', async () => {
+    const ownerId = 'a'.repeat(64);
+    vi.mocked(readClassroomGenerationJob).mockResolvedValue({
+      status: 'running',
+      ownerId,
+    } as never);
+    await runClassroomQueueTask(
+      { ...start, input: { requirement: 'owned course', enableTTS: false } },
+      bucket,
+      queue,
+    );
+    expect(claimCourse).toHaveBeenCalledWith(bucket, ownerId, 'course1');
+    while (pending.length) await next();
+    expect(registerCourse).toHaveBeenCalledWith(
+      bucket,
+      ownerId,
+      expect.objectContaining({ id: 'course1' }),
+    );
+    expect(vi.mocked(registerCourse).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(markClassroomGenerationJobSucceeded).mock.invocationCallOrder[0],
     );
   });
 

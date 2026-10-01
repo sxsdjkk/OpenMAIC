@@ -1,12 +1,18 @@
 /**
- * Device-scoped playback cursor persistence.
+ * Account-scoped playback on Workers; device-scoped persistence locally.
  *
  * The cursor is mutable resume state, not a learner-runtime fact. It therefore
- * lives in the KV `device` scope and remains last-write-wins. Legacy Dexie
+ * lives in R2 on Workers, or the KV `device` scope locally. Legacy Dexie
  * migration is delegated lazily so importing this module never opens either
  * browser store.
  */
 import { BrowserKVStore, type KVStore } from '@openmaic/storage';
+import {
+  isWorkerAccountEnabled,
+  loadCloudCursor,
+  saveCloudCursor,
+  clearCloudCursor,
+} from '@/lib/classroom/worker-account';
 
 export interface PlaybackCursor {
   sceneId: string;
@@ -140,6 +146,15 @@ export async function loadCursor(
   stageId: string,
   deps: PlaybackCursorDeps = {},
 ): Promise<PlaybackCursor | null> {
+  if (isWorkerAccountEnabled() && !deps.kv && !deps.legacyStore) {
+    const cloud = await loadCloudCursor(stageId);
+    if (cloud) return cloud;
+    // The owned course was authorized by the GET. Import only when cloud progress is absent.
+    const kv = resolveKv();
+    await migrateLegacyCursor(stageId, kv);
+    const local = await loadCursorValue(stageId, kv);
+    return local ? saveCloudCursor(stageId, local, true) : null;
+  }
   const kv = resolveKv(deps.kv);
   await migrateLegacyCursor(stageId, kv, deps.legacyStore);
   return loadCursorValue(stageId, kv);
@@ -151,6 +166,10 @@ export async function saveCursor(
   cursor: PlaybackCursor,
   deps: Pick<PlaybackCursorDeps, 'kv'> = {},
 ): Promise<void> {
+  if (isWorkerAccountEnabled() && !deps.kv) {
+    await saveCloudCursor(stageId, cursor);
+    return;
+  }
   await saveCursorValue(stageId, cursor, resolveKv(deps.kv));
 }
 
@@ -159,5 +178,6 @@ export async function clearCursor(
   stageId: string,
   deps: Pick<PlaybackCursorDeps, 'kv'> = {},
 ): Promise<void> {
+  if (isWorkerAccountEnabled() && !deps.kv) return clearCloudCursor(stageId);
   await resolveKv(deps.kv).remove(cursorKey(stageId), 'device');
 }

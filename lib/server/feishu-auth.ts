@@ -106,6 +106,12 @@ export async function getFeishuSession(request: Request): Promise<Session | null
   }
 }
 
+/** Stable account key without exposing the Feishu open_id in storage paths or the UI. */
+export async function feishuAccountId(subject: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(`feishu:${subject}`));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export function startFeishuLogin() {
   if (!isFeishuAuthConfigured())
     return new Response('Feishu login is not configured', { status: 503 });

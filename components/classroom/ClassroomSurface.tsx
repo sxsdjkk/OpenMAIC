@@ -53,6 +53,8 @@ import {
   shouldResumeClassroomGeneration,
 } from '@/lib/classroom/progressive-load-policy';
 import { useClassroomSession } from '@/lib/classroom/use-classroom-session';
+import { isWorkerAccountEnabled } from '@/lib/classroom/worker-account';
+import { loadCursor } from '@/lib/playback/cursor';
 
 const log = createLogger('Classroom');
 
@@ -109,6 +111,18 @@ export function ClassroomSurface({
       try {
         const loadResult = await runClassroomLoad({
           classroomId,
+          serverAuthoritative: isWorkerAccountEnabled(),
+          restorePlaybackPosition: isWorkerAccountEnabled()
+            ? async () => {
+                const cursor = await loadCursor(classroomId);
+                if (
+                  isCurrent() &&
+                  cursor &&
+                  useStageStore.getState().scenes.some((scene) => scene.id === cursor.sceneId)
+                )
+                  useStageStore.setState({ currentSceneId: cursor.sceneId });
+              }
+            : undefined,
           loadToken,
           isCurrent,
           loadFromStorage,

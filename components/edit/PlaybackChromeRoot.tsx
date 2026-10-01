@@ -35,6 +35,7 @@ import {
   saveActionResumePosition,
 } from '@/lib/playback/action-resume';
 import { loadCursor, saveCursor, type PlaybackCursor } from '@/lib/playback/cursor';
+import { isWorkerAccountEnabled } from '@/lib/classroom/worker-account';
 import { ActionEngine } from '@/lib/action/engine';
 import { createAudioPlayer } from '@/lib/utils/audio-player';
 import { useDiscussionTTS } from '@/lib/hooks/use-discussion-tts';
@@ -710,7 +711,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
         discussionTTS.cleanup();
 
         const sessionResumeCursor =
-          currentScene && typeof window !== 'undefined'
+          currentScene && typeof window !== 'undefined' && !isWorkerAccountEnabled()
             ? getActionResumeRestoreCursor(
                 readActionResumeState(window.sessionStorage, actionResumeStorageKey),
                 currentScene.id,
@@ -718,6 +719,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               )
             : { actionIndex: 0, position: null };
         let savedResumeActionIndex = sessionResumeCursor.actionIndex;
+        let cursorLoaded = true;
         const playbackStageId = stage?.id ?? currentScene?.stageId;
         if (currentScene && playbackStageId && !sessionResumeCursor.position) {
           try {
@@ -730,6 +732,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               savedResumeActionIndex = cursor.actionIndex;
             }
           } catch (error) {
+            cursorLoaded = false;
             console.warn(`Failed to load playback cursor for stage ${playbackStageId}:`, error);
           }
         }
@@ -746,6 +749,15 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
           lectureSpeech:
             savedResumeAction?.type === 'speech' ? (savedResumeAction as SpeechAction).text : null,
         });
+        // Manual navigation while paused is also learning progress. Wait for
+        // the cloud restore first; never overwrite it with a mount-time zero.
+        if (isWorkerAccountEnabled() && cursorLoaded && currentScene && playbackStageId) {
+          scheduleCursorSave(playbackStageId, {
+            sceneId: currentScene.id,
+            actionIndex: savedResumeActionIndex,
+            updatedAt: new Date().toISOString(),
+          });
+        }
 
         // A slide scene with no actions is still playable: the engine dwells on it
         // (see resolvePlaybackCursor) so a freshly inserted / emptied blank slide

@@ -162,6 +162,40 @@ beforeEach(() => {
   removeAssetMock.mockClear();
 });
 
+it('requires server authorization in Workers even when a cached course exists', async () => {
+  const { deps, setStage } = makeDeps({ serverAuthoritative: true });
+  setStage(makeStage('stage-a'));
+  const result = await runClassroomLoad(deps);
+  expect(result.outcome).toBe('absent');
+  expect(deps.loadFromStorage).not.toHaveBeenCalled();
+  expect(deps.fetchClassroom).toHaveBeenCalled();
+  expect(deps.loadRestoredMediaTasks).not.toHaveBeenCalled();
+});
+
+it('restores cloud playback before revealing the classroom and mounting the engine', async () => {
+  const restored = deferred<void>();
+  const restorePlaybackPosition = vi.fn(() => restored.promise);
+  const { deps } = makeDeps({
+    getCurrentStage: () => makeStage('stage-a', []),
+    restorePlaybackPosition,
+  });
+  const loading = runClassroomLoad(deps);
+  await vi.waitFor(() => expect(restorePlaybackPosition).toHaveBeenCalledOnce());
+  expect(deps.setLoading).not.toHaveBeenCalled();
+  restored.resolve();
+  expect((await loading).outcome).toBe('ready');
+  expect(deps.setLoading).toHaveBeenCalledWith(false);
+});
+
+it('does not silently start at page one when cloud progress temporarily fails', async () => {
+  const { deps } = makeDeps({
+    getCurrentStage: () => makeStage('stage-a', []),
+    restorePlaybackPosition: vi.fn().mockRejectedValue(new Error('Account request failed (503)')),
+  });
+  expect((await runClassroomLoad(deps)).outcome).toBe('failed');
+  expect(deps.setError).toHaveBeenCalledWith('Account request failed (503)');
+});
+
 describe('runClassroomLoad', () => {
   it('keeps the current load token valid when fallback scenes are committed', () => {
     useStageStore.getState().clearStore();

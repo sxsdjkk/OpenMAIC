@@ -374,6 +374,7 @@ import {
   PlaybackChromeRoot,
   type PlaybackChromeRootHandle,
 } from '@/components/edit/PlaybackChromeRoot';
+import { loadCursor, saveCursor } from '@/lib/playback/cursor';
 
 describe('PlaybackChromeRoot element-reference ownership', () => {
   let container: HTMLDivElement;
@@ -439,6 +440,64 @@ describe('PlaybackChromeRoot element-reference ownership', () => {
       await Promise.resolve();
     });
   }
+
+  it('saves paused manual scene navigation to the cloud without starting playback', async () => {
+    vi.stubEnv('NEXT_PUBLIC_WORKERS_ACCOUNT', '1');
+    vi.useFakeTimers();
+    vi.mocked(saveCursor).mockClear();
+    try {
+      await renderOwner();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1100);
+      });
+      stageState.currentSceneId = secondScene.id;
+      await rerenderOwner();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1100);
+      });
+      expect(saveCursor).toHaveBeenLastCalledWith(
+        'stage-1',
+        expect.objectContaining({ sceneId: secondScene.id, actionIndex: 0 }),
+      );
+      expect(mocks.engineStart).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('does not save a mount-time zero before the asynchronous cloud cursor resolves', async () => {
+    vi.stubEnv('NEXT_PUBLIC_WORKERS_ACCOUNT', '1');
+    vi.useFakeTimers();
+    vi.mocked(saveCursor).mockClear();
+    let resolve!: (value: null) => void;
+    vi.mocked(loadCursor).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    try {
+      await renderOwner();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1100);
+      });
+      expect(saveCursor).not.toHaveBeenCalled();
+      await act(async () => {
+        resolve(null);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1100);
+      });
+      expect(saveCursor).toHaveBeenCalledWith(
+        'stage-1',
+        expect.objectContaining({ sceneId: scene.id }),
+      );
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
+  });
 
   it('selects the stage snapshot whiteboard and sends an identity-only reference', async () => {
     const board = {

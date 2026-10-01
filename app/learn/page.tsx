@@ -6,6 +6,8 @@ import { ArrowLeft, ArrowRight, BookOpen, Clock3, Layers3, Plus } from 'lucide-r
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { listStages, loadStageData, type StageListItem } from '@/lib/utils/stage-storage';
 import { loadCursor } from '@/lib/playback/cursor';
+import { isWorkerAccountEnabled } from '@/lib/classroom/worker-account';
+import { fetchClassroomFromApi } from '@/lib/classroom/load-classroom';
 
 type LearningPosition = { scene: number; total: number } | null;
 
@@ -64,7 +66,13 @@ export default function LearnPage() {
         if (!latestCourse) return;
         try {
           const [stage, cursor] = await Promise.all([
-            loadStageData(latestCourse.id),
+            isWorkerAccountEnabled()
+              ? fetchClassroomFromApi(latestCourse.id).then((result) =>
+                  result.outcome === 'found'
+                    ? { scenes: result.classroom.scenes, currentSceneId: null }
+                    : null,
+                )
+              : loadStageData(latestCourse.id),
             loadCursor(latestCourse.id).catch(() => null),
           ]);
           if (!active || !stage || !stage.scenes.length) return;

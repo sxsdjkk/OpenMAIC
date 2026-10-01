@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '@/workers/web';
-import { createFeishuSession } from '@/lib/server/feishu-auth';
+import { createFeishuSession, feishuAccountId } from '@/lib/server/feishu-auth';
 
 describe('lightweight Workers entry', () => {
   let cookie: string;
+  let ownerId: string;
   const env = {
-    CLASSROOM_BUCKET: { get: vi.fn(), head: vi.fn(), put: vi.fn(), delete: vi.fn() },
+    CLASSROOM_BUCKET: { get: vi.fn(), head: vi.fn(), put: vi.fn(), delete: vi.fn(), list: vi.fn() },
     CLASSROOM_QUEUE: { send: vi.fn() },
     ASSETS: { fetch: vi.fn() },
     LEGACY_APP: { fetch: vi.fn() },
@@ -26,8 +27,13 @@ describe('lightweight Workers entry', () => {
       ';',
     )[0];
     vi.resetAllMocks();
+    ownerId = await feishuAccountId('test-user');
     env.CLASSROOM_BUCKET.get.mockResolvedValue(null);
-    env.CLASSROOM_BUCKET.head.mockResolvedValue(null);
+    env.CLASSROOM_BUCKET.head.mockImplementation(async (key: string) =>
+      key.startsWith('course-owners/') ? { size: 100, customMetadata: { ownerId } } : null,
+    );
+    env.CLASSROOM_BUCKET.list.mockResolvedValue({ objects: [], truncated: false });
+    env.CLASSROOM_BUCKET.put.mockResolvedValue({});
     env.ASSETS.fetch.mockImplementation(async () => new Response('<html>static</html>'));
     env.LEGACY_APP.fetch.mockResolvedValue(new Response('legacy'));
   });
@@ -46,6 +52,17 @@ describe('lightweight Workers entry', () => {
     ).toBe(401);
     expect(env.LEGACY_APP.fetch).not.toHaveBeenCalled();
     expect(env.CLASSROOM_BUCKET.get).not.toHaveBeenCalled();
+  });
+
+  it('identifies the authenticated account without exposing its Feishu id', async () => {
+    const response = await worker.fetch(request('/api/account'), env);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.accountId).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(body)).not.toContain('test-user');
+    expect((await worker.fetch(new Request('https://example.com/api/account'), env)).status).toBe(
+      401,
+    );
   });
 
   it('serves authenticated static HTML and RSC, blocking raw private pages', async () => {
@@ -84,7 +101,7 @@ describe('lightweight Workers entry', () => {
   });
 
   it('prepares legacy classrooms in Queue rather than in the HTTP request', async () => {
-    env.CLASSROOM_BUCKET.head.mockResolvedValue({ size: 123 });
+    env.CLASSROOM_BUCKET.head.mockResolvedValue({ size: 123, customMetadata: { ownerId } });
     const response = await worker.fetch(request('/api/classroom?id=course_123'), env);
     expect(response.status).toBe(503);
     expect(response.headers.get('retry-after')).toBe('2');
@@ -103,6 +120,7 @@ describe('lightweight Workers entry', () => {
           requirement: 'learn math',
           enableTTS: true,
           apiKey: 'do-not-forward',
+          ownerId: 'spoofed-owner',
         }),
       }),
       env,
@@ -115,6 +133,7 @@ describe('lightweight Workers entry', () => {
       baseUrl: 'https://example.com',
     });
     expect(JSON.stringify(env.CLASSROOM_QUEUE.send.mock.calls)).not.toContain('do-not-forward');
+    expect(JSON.parse(env.CLASSROOM_BUCKET.put.mock.calls[0][1]).ownerId).toBe(ownerId);
     expect(env.CLASSROOM_BUCKET.put).toHaveBeenCalledWith(
       `jobs/${job.jobId}.json`,
       expect.any(String),
@@ -155,7 +174,7 @@ describe('lightweight Workers entry', () => {
   it('reads small job status objects without running the generation code', async () => {
     env.CLASSROOM_BUCKET.get.mockResolvedValue({
       text: async () =>
-        JSON.stringify({ id: 'job123', status: 'succeeded', classroomId: 'course123' }),
+        JSON.stringify({ id: 'job123', ownerId, status: 'succeeded', classroomId: 'course123' }),
     });
     expect(
       await (await worker.fetch(request('/api/generate-classroom/job123'), env)).json(),
@@ -164,7 +183,7 @@ describe('lightweight Workers entry', () => {
   });
 
   it('streams byte ranges and HEAD without buffering audio', async () => {
-    env.CLASSROOM_BUCKET.head.mockResolvedValue({ size: 100 });
+    env.CLASSROOM_BUCKET.head.mockResolvedValue({ size: 100, customMetadata: { ownerId } });
     env.CLASSROOM_BUCKET.get.mockResolvedValue({ body: new Response(new Uint8Array([1, 2])).body });
     const response = await worker.fetch(
       request('/api/classroom-media/course123/audio/clip.mp3', { headers: { range: 'bytes=0-1' } }),
@@ -224,6 +243,7 @@ describe('lightweight Workers entry', () => {
 
   it('returns clip counts and terminates a stale job instead of an endless progress bar', async () => {
     const job = {
+      ownerId,
       status: 'running',
       updatedAt: new Date(Date.now() - 31 * 60_000).toISOString(),
       progress: 86,
@@ -264,6 +284,82 @@ describe('lightweight Workers entry', () => {
       body: '{"text":"hello"}',
     });
     expect(text).not.toHaveBeenCalled();
+    expect(env.LEGACY_APP.fetch).not.toHaveBeenCalled();
+  });
+
+  it('isolates catalog, course, media, progress and job status by account', async () => {
+    env.CLASSROOM_BUCKET.head.mockResolvedValue({
+      size: 100,
+      customMetadata: { ownerId: 'other' },
+    });
+    env.CLASSROOM_BUCKET.get.mockResolvedValue({
+      text: async () => JSON.stringify({ ownerId: 'other' }),
+    });
+    for (const path of [
+      '/api/classroom?id=course1',
+      '/api/classroom-media/course1/audio/a.mp3',
+      '/api/account/courses/course1/progress',
+      '/api/generate-classroom/job1',
+    ]) {
+      expect((await worker.fetch(request(path), env)).status).toBe(404);
+    }
+    await worker.fetch(request('/api/account/courses?cursor=next'), env);
+    expect(env.CLASSROOM_BUCKET.list).toHaveBeenCalledWith({
+      prefix: `accounts/${ownerId}/courses/`,
+      include: ['customMetadata'],
+      limit: 100,
+      cursor: 'next',
+    });
+    expect(env.LEGACY_APP.fetch).not.toHaveBeenCalled();
+  });
+
+  it('validates cloud progress and rejects cross-origin writes and legacy ownership bypass', async () => {
+    const path = '/api/account/courses/course1/progress';
+    for (const body of [
+      '{',
+      '{}',
+      JSON.stringify({ sceneId: 's1', actionIndex: -1, updatedAt: 'bad' }),
+    ])
+      expect((await worker.fetch(request(path, { method: 'PUT', body }), env)).status).toBe(400);
+    const cursor = { sceneId: 's1', actionIndex: 2, updatedAt: new Date().toISOString() };
+    const response = await worker.fetch(
+      request(path, { method: 'PUT', body: JSON.stringify(cursor) }),
+      env,
+    );
+    expect(await response.json()).toMatchObject({ cursor });
+    expect(env.CLASSROOM_BUCKET.put.mock.calls[0][0]).toBe(
+      `accounts/${ownerId}/progress/course1.json`,
+    );
+    expect(
+      (
+        await worker.fetch(
+          request(path, { method: 'PUT', headers: { origin: 'https://attacker.com' }, body: '{}' }),
+          env,
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (await worker.fetch(request('/api/classroom', { method: 'POST', body: '{}' }), env)).status,
+    ).toBe(405);
+  });
+
+  it('does not allow compatibility route aliases to bypass account ownership', async () => {
+    env.CLASSROOM_BUCKET.head.mockResolvedValue({
+      size: 100,
+      customMetadata: { ownerId: 'other' },
+    });
+    for (const path of [
+      '/api/classroom/?id=course1',
+      '/api/classroom////?id=course1',
+      '/api/%63lassroom?id=course1',
+      '/api/Classroom?id=course1',
+      '/api//classroom?id=course1',
+      '/api/%63lassroom-media/course1/audio/a.mp3',
+      '/api/Generate-Classroom/job1',
+      '/api/Account/courses',
+    ]) {
+      expect((await worker.fetch(request(path), env)).status).toBe(404);
+    }
     expect(env.LEGACY_APP.fetch).not.toHaveBeenCalled();
   });
 

@@ -157,3 +157,28 @@ Workers 类型由 Wrangler 生成，`workers/generator-env.d.ts` 导出必要类
 - `VERIFICATION_TARGET`: 学习平台首页角色音色选择及旧课堂 `tCt3H_dDVP`。
 - `VERIFICATION_EVIDENCE`: `/private/tmp/learning-fish-restore-voices.png`、`/private/tmp/learning-fish-restore-acceptance.json`、`/private/tmp/learning-fish-restore-regression.json`。
 - `VERIFICATION_GAPS`: 本轮未得到新合成音频，不能宣称已成功出声；未自动恢复失败长课或再次执行长课负载测试。临时目录证据不是永久云端存档。
+
+## 飞书账号课程与云端进度（2026-10-02）
+
+原来的飞书登录仅限制访问入口，课程目录与播放位置仍在浏览器。本轮按用户要求，将线上旧课程关联到操作时已登录的飞书账号，并用现有 R2 同步课程目录和播放位置。没有新建付费资源、升级套餐、更换服务密钥或语音模型。
+
+当前状态：旧课程绑定、云端目录和播放进度已上线。最后补查发现 `/api/classroom/` 的兼容路由变体可绕过标准入口的归属校验，已补尾斜杠规范化与敏感 API 别名的兼容转发禁令。通过用户指定的 KeKe Profile 续签已有 Cloudflare 授权后，补丁已发布；两轮独立身份复测中，标准接口及尾斜杠、大小写、编码、重复斜杠变体均返回 404，不再转发到兼容运行时。
+
+- `/api/account` 只返回已验证会话的稳定账号哈希；`/account` 提供可视核对页，不返回 Feishu open_id、Cookie 或令牌。迁移目标由真实浏览器会话确认，而非客户端参数或“第一个登录者”。
+- `course-owners/<id>.json` 使用条件创建与不可变归属；`accounts/<account>/courses/<id>.json` 保存课程摘要。列表每页最多 100 条，使用 R2 前缀、游标和元数据，不扫描或解析所有课堂大文件，也不并发读改写一个共享目录文件。
+- 新建任务的 ownerId 由服务端会话写入 job，Queue 预留课程时登记归属，完整发布后登记课程目录。客户端传入的 ownerId 不会被采用。
+- 课堂、媒体 GET/HEAD/Range、任务状态与进度接口均检查归属；其他账号统一返回 404，匿名 API 返回 401。媒体设置 private/no-store。没有提供公开的认领接口；不具备账号契约的旧课堂 POST 路径在 Workers 返回 405。
+- Workers 构建专用 `NEXT_PUBLIC_WORKERS_ACCOUNT=1`，首页和 `/learn` 只读云端当前账号目录。课堂每次先获服务端授权，不能以旧 IndexedDB 缓存绕过归属；本地 Node 运行保留原存储行为，没有启用 PostgreSQL 持久化。
+- 播放位置使用独立 R2 对象，条件写入并拒绝乱序旧时间戳覆盖。首次访问、云端位置不存在时，可从该课程旧浏览器游标导入，但不能覆盖已有云端游标。手动换页、暂停状态也保存；恢复完成后才挂载播放器，云端恢复失败会明确报错而不默默重置到第一页。小型进度 PUT 使用 keepalive 保留离页时的提交。
+
+本次迁移先生成明确清单，再由管理员通过现有 Queue 派发 18 条独立 `link-legacy-account` 消息。不存在公开迁移/转移所有权 API。9 份课堂 JSON（4 份完整、5 份 reserved）字节哈希保持一致；9 条旧任务新增归属，原始任务 JSON 在 `account-migrations/<account>/backups/` 留有条件创建备份，任务状态与检查点未被重新生成。4 门完整课程、共 14 页已进入该账号目录；5 个未完成占位不伪装成完整课程。所有记录的归属、回执、数据保留与必需目录项校验通过。
+
+管理脚本 `scripts/migrate-worker-account.mjs` 的 inspect/enqueue/verify 三阶段要求显式账号 ID 与清单路径；属于其他账号的记录会跳过，消费者也拒绝改绑。清单位于本机 `/private/tmp/learning-account-migration.json`，不纳入 Git。
+
+最终已发布版本：网页 `82aa45d9-b20c-43d3-bb5b-030ce0afa596`，生成器 `531cddd7-88e9-4f1f-a7eb-3a60cc555ce1`，私有兼容 Worker `7ed74aee-c53c-45b6-9055-f694e9d1d351`。156 项相关回归、应用类型检查与 Next/OpenNext 构建通过，账号功能与别名防护均已部署。网页脚本压缩后约 43.67KiB。10689 个发布相关 JS/HTML/RSC 文件扫描未发现 7 项候选本地/飞书密钥值。原有 OpenNext 依赖复制诊断、重复 tier 警告和完整 tsc 中 6 个生成路由类型冲突不属于本次改动。
+
+- `VERIFICATION_TOOL`: Codex In-app Browser / CUA；独立会话 HTTP 与只读 R2 校验。
+- `VERIFICATION_REASON`: 复用用户真实飞书账号核对归属、目录和课堂，另用已认证测试身份验证账号隔离，不能仅依赖代码推断。
+- `VERIFICATION_TARGET`: `/learn`、Transformer 课堂 `ZQZC4Lwc9l`、已存在的课堂/音频/任务/进度接口。
+- `VERIFICATION_EVIDENCE`: 真实学习空间显示 4 门课程、14 页；暂停手动换至第 2/11 页，R2 游标实际保存第二页，新标签页恢复到第二页；验收后还原到原第一页面。最终发布后刷新课程目录正常，再次校验全部 18 条迁移记录的归属、回执与数据保留通过。`/private/tmp/learning-account-isolation.mjs` 两轮复测通过：测试账号目录为空，旧课堂、已有音频、任务和进度及 4 类接口路径变体均返回 404，且来自 lite 入口；匿名列表 401。截图 `/private/tmp/learning-account-resume.png`、`/private/tmp/learning-account-courses.png`，云端游标核对 `/private/tmp/learning-account-progress-second-page.json` 和 `/private/tmp/learning-account-progress-restored.json`。
+- `VERIFICATION_GAPS`: 发布后首轮大小写变体出现一次 500，随后两轮均为 404，未返回课程内容；没有足够运行日志判断该瞬时错误原因，也未进行高并发或免费档 CPU 负载验收。没有在另一台设备执行新的飞书扫码授权；同账号跨设备契约由云端接口、无本地目录依赖的回归和新标签页实测覆盖。本轮不执行模型/语音生成或完整长课负载，之前失败长课仍不提供自动恢复。文件夹、聊天、笔记、课件编辑和本地删除不是本次云端同步范围；旧本地缓存保留，刷新页面即可使用新版。临时目录证据不是永久云端存档。

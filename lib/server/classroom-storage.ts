@@ -68,8 +68,9 @@ export interface ClassroomBucket {
     text(): Promise<string>;
     body: ReadableStream;
     customMetadata?: Record<string, string>;
+    etag?: string;
   } | null>;
-  head(key: string): Promise<{ size: number } | null>;
+  head(key: string): Promise<{ size: number; customMetadata?: Record<string, string> } | null>;
   put(
     key: string,
     value: string | Uint8Array,

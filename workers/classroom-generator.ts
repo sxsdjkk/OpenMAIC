@@ -16,10 +16,12 @@ import {
 } from '../lib/server/classroom-storage';
 import { POST as generateTTS } from '../app/api/generate/tts/route';
 import type { ExportedHandler, GeneratorEnv, Message, Queue } from './generator-env';
+import { linkLegacyAccount, type LegacyAccountTask } from '../lib/server/worker-account-migration';
 
 type ClassroomQueueMessage =
   | ClassroomStartTask
   | ClassroomStepTask
+  | LegacyAccountTask
   | { kind: 'publish-classroom'; classroomId: string }
   | { kind: 'tts'; jobId: string; body: string };
 
@@ -45,6 +47,11 @@ const classroomGenerator = {
     for (const message of batch.messages) {
       try {
         if ('kind' in message.body && message.body.kind !== 'classroom-step') {
+          if (message.body.kind === 'link-legacy-account') {
+            await linkLegacyAccount(env.CLASSROOM_BUCKET, message.body);
+            message.ack();
+            continue;
+          }
           if (message.body.kind === 'tts') {
             const { jobId, body } = message.body;
             const key = `tts-jobs/${jobId}.json`;

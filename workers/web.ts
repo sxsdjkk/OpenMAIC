@@ -4,6 +4,7 @@ import {
   isFeishuAuthConfigured,
   isFeishuAuthRequired,
   startFeishuLogin,
+  feishuAccountId,
 } from '../lib/server/feishu-auth';
 import { parseRangeHeader } from '../lib/server/http-range';
 import { apiError, apiSuccess } from '../lib/server/api-response';
@@ -11,10 +12,18 @@ import { GET as serverProviders } from '../app/api/server-providers/route';
 import { POST as generateImage } from '../app/api/generate/image/route';
 import type { GenerateClassroomInput } from '../lib/server/classroom-generation';
 import type { ClassroomGenerationJob } from '../lib/server/classroom-job-store';
-import type { ClassroomBucket } from '../lib/server/classroom-storage';
+import {
+  ownsCourse,
+  listAccountCourses,
+  readProgress,
+  writeProgress,
+  deleteProgress,
+  validProgress,
+  type AccountBucket,
+} from '../lib/server/worker-accounts';
 
 interface WebEnv {
-  CLASSROOM_BUCKET: ClassroomBucket;
+  CLASSROOM_BUCKET: AccountBucket;
   CLASSROOM_QUEUE: { send(message: unknown): Promise<void> };
   ASSETS: { fetch(request: Request): Promise<Response> };
   LEGACY_APP: { fetch(request: Request): Promise<Response> };
@@ -67,7 +76,7 @@ async function readSmallBody(request: Request): Promise<string | Response> {
   return new TextDecoder().decode(bytes);
 }
 
-async function createJob(request: Request, env: WebEnv, url: URL) {
+async function createJob(request: Request, env: WebEnv, url: URL, ownerId: string) {
   const body = await readSmallBody(request);
   if (body instanceof Response) return body;
   let raw: Partial<GenerateClassroomInput>;
@@ -102,6 +111,7 @@ async function createJob(request: Request, env: WebEnv, url: URL) {
   const now = new Date().toISOString();
   const job: ClassroomGenerationJob = {
     id: jobId,
+    ownerId,
     status: 'queued',
     step: 'queued',
     progress: 0,
@@ -164,13 +174,14 @@ async function queuedTTS(request: Request, env: WebEnv) {
 
 async function route(request: Request, env: WebEnv): Promise<Response> {
   const url = new URL(request.url);
-  const pathname = url.pathname;
+  const pathname = url.pathname.replace(/\/+$/, '') || '/';
   if (pathname === '/auth/login') return startFeishuLogin();
   if (pathname === '/auth/callback') return finishFeishuLogin(request);
+  const session = await getFeishuSession(request);
   if (isFeishuAuthRequired()) {
     if (!isFeishuAuthConfigured())
       return new Response('Feishu login is not configured', { status: 503 });
-    if (!(await getFeishuSession(request))) {
+    if (!session) {
       return pathname.startsWith('/api/')
         ? apiError('UNAUTHENTICATED', 401, 'Feishu login required')
         : new Response(null, {
@@ -178,6 +189,64 @@ async function route(request: Request, env: WebEnv): Promise<Response> {
             headers: { Location: '/auth/login', 'Cache-Control': 'no-store' },
           });
     }
+  }
+  const ownerId = session ? await feishuAccountId(session.sub) : null;
+  if (
+    request.method !== 'GET' &&
+    request.method !== 'HEAD' &&
+    request.headers.has('origin') &&
+    request.headers.get('origin') !== url.origin
+  )
+    return apiError('INVALID_REQUEST', 403, 'Cross-origin write is not allowed');
+  if (pathname === '/api/account/courses' && request.method === 'GET') {
+    if (!ownerId) return apiError('UNAUTHENTICATED', 401, 'Feishu login required');
+    const cursor = url.searchParams.get('cursor') || undefined;
+    if (cursor && cursor.length > 2048) return apiError('INVALID_REQUEST', 400, 'Invalid cursor');
+    return apiSuccess(await listAccountCourses(env.CLASSROOM_BUCKET, ownerId, cursor));
+  }
+  const progressPath = /^\/api\/account\/courses\/([\w-]{1,64})\/progress$/.exec(pathname);
+  if (progressPath) {
+    if (!ownerId) return apiError('UNAUTHENTICATED', 401, 'Feishu login required');
+    const id = progressPath[1];
+    if (!(await ownsCourse(env.CLASSROOM_BUCKET, ownerId, id)))
+      return apiError('INVALID_REQUEST', 404, 'Course not found');
+    if (request.method === 'GET')
+      return apiSuccess({ cursor: await readProgress(env.CLASSROOM_BUCKET, ownerId, id) });
+    if (request.method === 'PUT') {
+      const body = await readSmallBody(request);
+      if (body instanceof Response) return body;
+      let cursor: unknown;
+      try {
+        cursor = JSON.parse(body);
+      } catch {
+        return apiError('INVALID_REQUEST', 400, 'Invalid JSON');
+      }
+      if (!validProgress(cursor)) return apiError('INVALID_REQUEST', 400, 'Invalid progress');
+      return apiSuccess({
+        cursor: await writeProgress(
+          env.CLASSROOM_BUCKET,
+          ownerId,
+          id,
+          { sceneId: cursor.sceneId, actionIndex: cursor.actionIndex, updatedAt: cursor.updatedAt },
+          request.headers.get('if-none-match') === '*',
+        ),
+      });
+    }
+    if (request.method === 'DELETE') {
+      await deleteProgress(env.CLASSROOM_BUCKET, ownerId, id);
+      return apiSuccess({ cursor: null });
+    }
+    return apiError('INVALID_REQUEST', 405, 'Method not allowed');
+  }
+  if ((pathname === '/api/account' || pathname === '/account') && request.method === 'GET') {
+    if (!session) return apiError('UNAUTHENTICATED', 401, 'Feishu login required');
+    const accountId = await feishuAccountId(session.sub);
+    if (pathname === '/account')
+      return new Response(
+        `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>当前学习账号</title><body><h1>当前学习账号</h1><p>已通过飞书登录</p><p id="account-id">${accountId}</p><a href="/learn">我的课程</a></body></html>`,
+        { headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+      );
+    return apiSuccess({ accountId });
   }
   if (pathname.startsWith('/__worker-pages/')) return new Response('Not found', { status: 404 });
   const classroomPath = /^\/classroom\/([a-zA-Z0-9_-]{1,64})$/.exec(pathname);
@@ -214,12 +283,16 @@ async function route(request: Request, env: WebEnv): Promise<Response> {
   if (pathname === '/api/generate/image' && request.method === 'POST')
     return generateImage(request);
   if (pathname === '/api/generate-classroom' && request.method === 'POST')
-    return createJob(request, env, url);
+    return ownerId
+      ? createJob(request, env, url, ownerId)
+      : apiError('UNAUTHENTICATED', 401, 'Feishu login required');
   const jobPath = /^\/api\/generate-classroom\/([a-zA-Z0-9_-]{1,64})$/.exec(pathname);
   if (jobPath && request.method === 'GET') {
     const object = await env.CLASSROOM_BUCKET.get(`jobs/${jobPath[1]}.json`);
     if (!object) return apiError('INVALID_REQUEST', 404, 'Job not found');
     const job: ClassroomGenerationJob = JSON.parse(await object.text());
+    if (!ownerId || job.ownerId !== ownerId)
+      return apiError('INVALID_REQUEST', 404, 'Job not found');
     // A hard runtime termination cannot write a failure. Do not animate/poll forever.
     if (job.status === 'running' && Date.now() - Date.parse(job.updatedAt) > 30 * 60_000) {
       job.status = 'failed';
@@ -237,6 +310,8 @@ async function route(request: Request, env: WebEnv): Promise<Response> {
   if (pathname === '/api/classroom' && request.method === 'GET') {
     const id = url.searchParams.get('id') || '';
     if (!validId(id)) return apiError('INVALID_REQUEST', 400, 'Invalid classroom id');
+    if (!ownerId || !(await ownsCourse(env.CLASSROOM_BUCKET, ownerId, id)))
+      return apiError('INVALID_REQUEST', 404, 'Classroom not found');
     const object = await env.CLASSROOM_BUCKET.get(`classrooms/${id}/published.json`);
     if (object)
       return new Response(object.body, {
@@ -254,6 +329,8 @@ async function route(request: Request, env: WebEnv): Promise<Response> {
     pathname,
   );
   if (mediaPath && (request.method === 'GET' || request.method === 'HEAD')) {
+    if (!ownerId || !(await ownsCourse(env.CLASSROOM_BUCKET, ownerId, mediaPath[1])))
+      return apiError('ASSET_NOT_FOUND', 404, 'Media not found');
     let file: string;
     try {
       file = decodeURIComponent(mediaPath[3]);
@@ -289,7 +366,7 @@ async function route(request: Request, env: WebEnv): Promise<Response> {
         'Content-Type':
           mime[file.split('.').pop()?.toLowerCase() || ''] || 'application/octet-stream',
         'Content-Length': String(partial ? range.end - range.start + 1 : metadata.size),
-        'Cache-Control': 'private, max-age=86400, immutable',
+        'Cache-Control': 'private, no-store',
         'Accept-Ranges': 'bytes',
         ...(partial
           ? { 'Content-Range': `bytes ${range.start}-${range.end}/${metadata.size}` }
@@ -297,6 +374,19 @@ async function route(request: Request, env: WebEnv): Promise<Response> {
       },
     });
   }
+  // The legacy create route has no account ownership contract. Never bypass the Queue path.
+  if (pathname === '/api/classroom')
+    return apiError('INVALID_REQUEST', 405, 'Use account-scoped course generation');
+  // Next's compatibility router may accept aliases that did not match our
+  // handlers. Never forward any spelling of an account-sensitive endpoint.
+  let legacyPath: string;
+  try {
+    legacyPath = decodeURIComponent(pathname).replace(/\/+/g, '/');
+  } catch {
+    return apiError('INVALID_REQUEST', 400, 'Invalid path');
+  }
+  if (/^\/api\/(classroom|classroom-media|generate-classroom|account)(\/|$)/i.test(legacyPath))
+    return apiError('INVALID_REQUEST', 404, 'Not found');
   // Non-core APIs retain their existing behavior in a separate isolate.
   const response = await env.LEGACY_APP.fetch(request);
   const headers = new Headers(response.headers);

@@ -70,6 +70,7 @@ import {
   type MediaTaskLookupEntry,
 } from '@/lib/media/media-task-resolution';
 import { slideMediaReferenceSlots } from '@/lib/media/slide-media-slots';
+import { isWorkerAccountEnabled, listCloudCourses } from '@/lib/classroom/worker-account';
 
 const log = createLogger('StageStorage');
 
@@ -785,6 +786,8 @@ async function listOwnerStagesFromServer(): Promise<StageListItem[]> {
  * List all stages
  */
 export async function listStages(): Promise<StageListItem[]> {
+  // Cloud failures must not fall back to another account's device-local library.
+  if (isWorkerAccountEnabled()) return listCloudCourses();
   try {
     if (isBrowserPersistenceEnabled()) {
       // Server persistence is on: the generic document listing answers 403 by

@@ -22,6 +22,7 @@ import type { TTSProviderId } from '@/lib/audio/types';
 import type { Scene } from '@/lib/types/stage';
 import type { Queue } from '@/workers/generator-env';
 import { TTS_PROVIDERS } from '@/lib/audio/constants';
+import { claimCourse, registerCourse } from './worker-accounts';
 
 export interface ClassroomStartTask {
   jobId: string;
@@ -113,6 +114,7 @@ export async function runClassroomQueueTask(
       onProgress: (event) => updateClassroomGenerationJob(task.jobId, event).then(() => {}),
     });
     if (!plan.outlines.length) throw new Error('课程大纲为空');
+    if (job.ownerId) await claimCourse(bucket, job.ownerId, plan.stage.id);
     checkpoint = {
       input: task.input,
       baseUrl: task.baseUrl,
@@ -237,6 +239,7 @@ export async function runClassroomQueueTask(
       { id: plan.stage.id, stage: plan.stage, scenes: checkpoint.scenes },
       baseUrl,
     );
+    if (job.ownerId) await registerCourse(bucket, job.ownerId, persisted);
     await markClassroomGenerationJobSucceeded(task.jobId, {
       ...persisted,
       scenesCount: persisted.scenes.length,

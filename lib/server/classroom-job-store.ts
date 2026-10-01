@@ -16,6 +16,7 @@ export type ClassroomGenerationJobStatus = 'queued' | 'running' | 'succeeded' | 
 
 export interface ClassroomGenerationJob {
   id: string;
+  ownerId?: string;
   status: ClassroomGenerationJobStatus;
   step: ClassroomGenerationStep | 'queued' | 'failed';
   progress: number;

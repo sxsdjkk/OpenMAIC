@@ -66,8 +66,10 @@
     "OPENAI_MODELS": "deepseek-flash",
     "DEFAULT_MODEL": "openai:deepseek-flash",
     "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
-    "TTS_OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
-    "TTS_OPENROUTER_MODELS": "fish-audio/s2.1-pro-free:free",
+    "TTS_FISH_BASE_URL": "https://api.fish.audio/v1",
+    "TTS_FISH_MODELS": "s2.1-pro-free",
+    "TTS_FISH_FALLBACK_MODEL": "s2.1-pro",
+    "TTS_OPENROUTER_ENABLED": "false",
     "TTS_OPENAI_ENABLED": "false",
   },
 }

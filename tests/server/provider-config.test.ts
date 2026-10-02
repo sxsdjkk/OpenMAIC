@@ -29,6 +29,7 @@ const ENV_PREFIXES_TO_CLEAR = [
   'OLLAMA',
   'BEDROCK',
   'TTS_OPENAI',
+  'TTS_FISH',
   'TTS_OPENROUTER',
   'TTS_AZURE',
   'TTS_GLM',
@@ -776,6 +777,22 @@ video:
       vi.stubEnv('TTS_OPENAI_ENABLED', 'false');
       const { getServerTTSProviders } = await import('@/lib/server/provider-config');
       expect(getServerTTSProviders()['openai-tts']).toEqual({ disabled: true });
+    });
+
+    it('serves official Fish separately and pins free-first regardless of stale client model', async () => {
+      vi.stubEnv('TTS_FISH_API_KEY', 'fish-official-test');
+      vi.stubEnv('TTS_FISH_BASE_URL', 'https://api.fish.audio/v1');
+      vi.stubEnv('TTS_OPENROUTER_ENABLED', 'false');
+      const { getServerTTSProviders, resolveTTSApiKey, resolveTTSBaseUrl, resolveTTSModel } =
+        await import('@/lib/server/provider-config');
+      expect(getServerTTSProviders()['fish-tts']).toEqual({});
+      expect(getServerTTSProviders()['openrouter-tts']).toEqual({ disabled: true });
+      expect(resolveTTSApiKey('fish-tts', 'wrong-openrouter-key')).toBe('fish-official-test');
+      expect(resolveTTSBaseUrl('fish-tts', 'https://wrong.example')).toBe(
+        'https://api.fish.audio/v1',
+      );
+      expect(resolveTTSModel('fish-tts', 'fish-audio/s2.1-pro-free:free')).toBe('s2.1-pro-free');
+      expect(resolveTTSModel('fish-tts', 's2.1-pro')).toBe('s2.1-pro-free');
     });
 
     it('force-disables browser-native via env (it is client-only, has no key)', async () => {

@@ -33,6 +33,8 @@ vi.mock('@/lib/audio/tts-providers', async (importOriginal) => {
 });
 
 const TTS_ENV_PREFIXES = [
+  'TTS_FISH',
+  'TTS_OPENROUTER',
   'TTS_OPENAI',
   'TTS_AZURE',
   'TTS_GLM',
@@ -77,6 +79,43 @@ describe('POST /api/generate/tts missing-key contract (#665)', () => {
   });
 
   afterEach(() => vi.restoreAllMocks());
+
+  it('migrates a legacy OpenRouter Fish request to the managed official API and retains the voice', async () => {
+    vi.stubEnv('TTS_FISH_API_KEY', 'fish-official-test');
+    vi.stubEnv('TTS_FISH_BASE_URL', 'https://api.fish.audio/v1');
+    vi.stubEnv('TTS_OPENROUTER_ENABLED', 'false');
+    const { POST } = await import('@/app/api/generate/tts/route');
+    const res = await POST(
+      ttsRequest({
+        ttsProviderId: 'openrouter-tts',
+        ttsVoice: 'original-fish-voice',
+        ttsModelId: 'fish-audio/s2.1-pro-free:free',
+        ttsApiKey: 'old-openrouter-key',
+        ttsBaseUrl: 'https://wrong.example/v1',
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mocks.generateTTS).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: 'fish-tts',
+        modelId: 's2.1-pro-free',
+        apiKey: 'fish-official-test',
+        baseUrl: 'https://api.fish.audio/v1',
+        voice: 'original-fish-voice',
+      }),
+      'Hello',
+    );
+  });
+
+  it('does not migrate a legacy request to a force-disabled Fish provider', async () => {
+    vi.stubEnv('TTS_FISH_API_KEY', 'fish-official-test');
+    vi.stubEnv('TTS_FISH_ENABLED', 'false');
+    vi.stubEnv('TTS_OPENROUTER_ENABLED', 'false');
+    const { POST } = await import('@/app/api/generate/tts/route');
+    const res = await POST(ttsRequest({ ttsProviderId: 'openrouter-tts', ttsVoice: 'voice-1' }));
+    expect(res.status).toBe(403);
+    expect(mocks.generateTTS).not.toHaveBeenCalled();
+  });
 
   it('returns 400 MISSING_API_KEY for a keyed provider with no key (server or client)', async () => {
     const { POST } = await import('@/app/api/generate/tts/route');

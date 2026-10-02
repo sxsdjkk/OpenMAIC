@@ -1401,6 +1401,7 @@
     "enterCustomBaseUrl": "Saisissez une URL de base personnalisée",
     "browserNativeNote": "La reconnaissance vocale native du navigateur ne demande aucune configuration et est entièrement gratuite",
     "providerOpenRouterTTS": "OpenRouter · Fish Audio Free",
+    "providerFishTTS": "Fish Audio · Official (free first)",
     "providerOpenAITTS": "OpenAI TTS (gpt-4o-mini-tts)",
     "providerAzureTTS": "Azure TTS",
     "providerGLMTTS": "GLM TTS",

@@ -1401,6 +1401,7 @@
     "enterCustomBaseUrl": "أدخل عنوانًا أساسيًا مخصصًا",
     "browserNativeNote": "التعرف على الكلام المُدمج في المتصفح لا يحتاج تكوينًا وهو مجاني تمامًا",
     "providerOpenRouterTTS": "OpenRouter · Fish Audio Free",
+    "providerFishTTS": "Fish Audio · Official (free first)",
     "providerOpenAITTS": "OpenAI TTS (gpt-4o-mini-tts)",
     "providerAzureTTS": "Azure TTS",
     "providerGLMTTS": "GLM TTS",

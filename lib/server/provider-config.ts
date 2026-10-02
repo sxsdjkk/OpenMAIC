@@ -86,6 +86,7 @@ export const LLM_ENV_MAP: Record<string, string> = {
 };
 
 const TTS_ENV_MAP: Record<string, string> = {
+  TTS_FISH: 'fish-tts',
   TTS_OPENROUTER: 'openrouter-tts',
   TTS_OPENAI: 'openai-tts',
   TTS_AZURE: 'azure-tts',
@@ -729,6 +730,7 @@ export function resolveTTSModel(
   clientModel?: string,
   voiceId?: string,
 ): string | undefined {
+  if (providerId === 'fish-tts') return TTS_PROVIDERS['fish-tts'].defaultModelId;
   if (providerId === 'openrouter-tts') return TTS_PROVIDERS['openrouter-tts'].defaultModelId;
   const entry = getConfig().tts[providerId];
   const pinnedModels = entry?.models?.filter(Boolean) ?? [];

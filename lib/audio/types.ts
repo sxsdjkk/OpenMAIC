@@ -80,6 +80,7 @@
  * Keep in sync with TTS_PROVIDERS registry in constants.ts
  */
 export type BuiltInTTSProviderId =
+  | 'fish-tts'
   | 'openai-tts'
   | 'openrouter-tts'
   | 'azure-tts'

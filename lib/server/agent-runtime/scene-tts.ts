@@ -59,7 +59,9 @@ export async function synthesizeSceneNarration(input: SceneTtsInput): Promise<Sc
     return { available: false, changed: false, generated: 0, skipped: 0, failed: [] };
   }
   const voice =
-    bound?.providerId === providerId && bound.voiceId
+    (bound?.providerId === providerId ||
+      (bound?.providerId === 'openrouter-tts' && providerId === 'fish-tts')) &&
+    bound.voiceId
       ? bound.voiceId
       : DEFAULT_TTS_VOICES[providerId as keyof typeof DEFAULT_TTS_VOICES] || '';
   const modelId =

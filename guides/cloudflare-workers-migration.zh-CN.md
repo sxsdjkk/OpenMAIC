@@ -202,3 +202,43 @@ Workers 类型由 Wrangler 生成，`workers/generator-env.d.ts` 导出必要类
 - `VERIFICATION_TARGET`: `/learn`、任务 `489def1e-0218-471e-bac9-533bfba83a73` 的重试及进度页、跨账号生成记录和重试接口。
 - `VERIFICATION_EVIDENCE`: 页面显示 5 条失败记录和 4 个“重试生成”按钮。实际点击指定的 11 页论文课程后进入“语音 1/68”，R2 任务为 running、retryCount=1；大纲、原始输入、11 个场景 ID、检查点和课程 ID `JU5Ctk9CDT` 均保持不变，未重做课件。片段自动重试耗尽后再次进入 failed、0/68，进度页恢复“重试生成”按钮；最终检查点与原始输入仍保持相同哈希。独立账号生成列表为空，已知课程/媒体/任务/进度及重试和路径别名均返回 404，匿名列表及重试为 401。截图 `/private/tmp/learning-failed-courses.png`、`/private/tmp/learning-retry-progress.png`、`/private/tmp/learning-retry-failed.png`，数据摘要 `/private/tmp/learning-retry-before.json`、`/private/tmp/learning-retry-after.json` 与 `/private/tmp/learning-retry-final.json`。
 - `VERIFICATION_GAPS`: 网络曾在应用响应前短暂断开，恢复后页面及 HTTP 验收通过。重试入口和断点接续已实测，但该课程语音合成仍失败，未完成 68 段语音；本轮没有改动 TTS 配置或调查片段失败的具体上游原因，也未进行高并发或 CPU 负载验收。1 条无完整输入/检查点的历史任务无法原地恢复。临时目录证据不是永久云端存档。
+
+## Fish Audio 官方直连与受控付费回退（2026-10-02）
+
+按用户要求将当前部署的 TTS 从 OpenRouter 切换为 Fish Audio 官方接口。新增 `fish-tts` 提供商，默认请求 `s2.1-pro-free`；保留上文原六个音色、默认梓轩及用户已选的 Fish 音色，不修改课程文字、已保存课件或音频。
+
+配置如下，官方 Key 只在本地 `.env.local` 和三个现有 Worker 的 Secret 中保存，不提交 Git，不写入 Queue 消息或构建产物：
+
+```dotenv
+TTS_FISH_API_KEY=
+TTS_FISH_BASE_URL=https://api.fish.audio/v1
+TTS_FISH_MODELS=s2.1-pro-free
+TTS_FISH_FALLBACK_MODEL=s2.1-pro
+TTS_OPENROUTER_ENABLED=false
+```
+
+原生请求使用 `POST /v1/tts`、Bearer 授权和 `model` 请求头；JSON 中传入 `text`、`reference_id`、`format: mp3` 与 `prosody.speed`，不再使用 OpenAI 兼容的 `input`/`voice` 字段。[Fish Audio TTS 文档](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech)
+
+- 每段语音先请求免费模型。仅当 HTTP 429 或 402 的错误明确同时包含免费、配额/日限额/用量限额及耗尽含义，且不是并发限制时，使用同一文字、音色、速度和取消信号，以 `s2.1-pro` 重试一次。成功后记录实际使用的模型；付费失败不在适配器内循环回退。
+- 普通限流、并发限制、鉴权失败、余额不足、网络错误、服务端 5xx 或非音频成功响应均不会触发付费回退。保留现有限流退避、音频校验、私网与重定向安全检查。服务端固定免费为首选，拒绝未知模型，避免 Fish 将错误模型名称默认解释为付费 Pro。
+- 官方当前未公开固定的每日字符额度或统一的“免费额度耗尽”错误码，不能把所有 429 都当成当天免费额度用完。此判断采取保守匹配；若未来错误格式变化，应先核对实际响应再补规则。[定价和限流说明](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits)
+- 不永久将账号切成付费模式：每次合成都重新优先尝试免费，免费恢复后自然回到免费。将服务端 `TTS_FISH_FALLBACK_MODEL` 设为空可关闭付费回退。Pro 按官方用量计费，当前为每百万 UTF-8 字节 15 美元，需要 Fish 账号余额；本轮没有为验证而强制调用付费模型。[官方定价](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits)
+- 旧浏览器和课程保留的 `openrouter-tts` 请求，在当前“旧提供商关闭、官方提供商已配置”的服务端条件下转为官方 Fish；浏览器同步配置保留原 Fish 音色。残留 `flux-*` 音色才回退为梓轩。课堂 Queue 每个语音片段读取当前服务端配置，因此旧断点可沿用，不需重写课件或自动重跑失败课程。
+
+三个 Worker 已保留既有其他 Secret、服务绑定、R2 和 Queue 配置并发布；未新增资源或升级 Cloudflare 套餐。原 OpenRouter 密钥保留供其他能力使用，当前 TTS 不再走 OpenRouter。
+
+- 网页：`b4e00fcf-ed06-4409-af92-daa5526bf9fc`。
+- 生成器：`14dcaf3b-05bb-4a6a-8469-d53f41332533`。
+- 私有兼容 Worker：`8168bf9a-dac2-4376-ac38-e3bcf4386eac`。
+
+16 组相关回归共 430 项通过，覆盖原生协议、配额耗尽的一次付费回退、其他失败不付费、原音色、旧请求转换与浏览器设置同步。应用 TypeScript、ESLint、格式检查、12 语言键对齐、Next/OpenNext 构建及生成器部署检查通过。完整 `tsc` 仍有此前的 6 个 Next 生成路由类型冲突，原有构建诊断未扩展修复。`.open-next`、`.next/server`、`.next/static` 共 12429 个发布相关文件扫描，未发现 5 项候选本地服务密钥值；`.env.local` 已恢复且未纳入版本控制。
+
+本地官方免费请求返回 HTTP 200、`audio/mpeg`，约 2.659 秒得到 36779 字节 MP3，可解析时长约 2.299 秒。线上通过已有 Queue 派发一条独立短句 TTS，特意携带旧 OpenRouter Fish 提供商/模型 ID，不传客户端密钥；生成器成功写入 R2 结果 `tts-jobs/fish-direct-da1f70fc-a159-47dd-8252-8c1bc5587f22.json`。音频为 35107 字节有效 MP3、44.1kHz 单声道、约 2.194 秒，SHA-256 为 `8419dbb2337d974ee909056e90403320e56e6b8dd386b6f9d1acc8539bde8ed9`。三个 Worker 的管理接口均确认官方 Secret 存在、免费首选/付费回退变量正确、旧 TTS 提供商关闭；核对时没有输出密钥值。
+
+- `VERIFICATION_TOOL`: Cloudflare 管理接口、R2 结果读取、`file`/`afinfo`、Vitest；浏览器验证未通过。
+- `VERIFICATION_REASON`: 按浏览器验证路由技能尝试复用真实登录页面，但访问保护拒绝该操作；未绕过保护，改用独立后端验收，并请用户手动刷新试听。
+- `VERIFICATION_TARGET`: 三个 Worker 的官方 TTS 配置、旧请求兼容、真实 Queue 合成结果及受控付费回退。
+- `VERIFICATION_EVIDENCE`: `/private/tmp/fish-official-probe.json`、`/private/tmp/fish-official-test.mp3`、`/private/tmp/fish-worker-test-job.json`、`/private/tmp/fish-worker-acceptance.json`、`/private/tmp/fish-worker-test.mp3`、`/private/tmp/fish-direct-secret-scan.json`；430 项回归通过。临时目录证据不是永久云端存档。
+- `VERIFICATION_GAPS`: 真实免费额度尚未耗尽，付费回退仅由模拟响应测试验证，未制造付费请求；未自动续跑旧失败课程，未执行完整长课、高并发或免费档 CPU 负载验收。浏览器保护阻止页面检查，尚未取得本轮真实页面的音色显示与试听证据，不能宣称前端播放已验收。
+
+本轮交付状态为 `DONE_WITH_CONCERNS`：官方免费直连、服务端兼容与发布已验收；页面试听及真实配额耗尽时的付费调用仍属未实测项。

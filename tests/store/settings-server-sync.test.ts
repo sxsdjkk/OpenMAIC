@@ -65,6 +65,8 @@ vi.mock('@/lib/audio/constants', async (importOriginal) => {
   return {
     ...actual,
     TTS_PROVIDERS: {
+      'fish-tts': actual.TTS_PROVIDERS['fish-tts'],
+      'openrouter-tts': actual.TTS_PROVIDERS['openrouter-tts'],
       'openai-tts': {
         id: 'openai-tts',
         name: 'OpenAI TTS',
@@ -99,6 +101,8 @@ vi.mock('@/lib/audio/constants', async (importOriginal) => {
       'browser-native': actual.ASR_PROVIDERS['browser-native'],
     },
     DEFAULT_TTS_VOICES: {
+      'fish-tts': actual.DEFAULT_TTS_VOICES['fish-tts'],
+      'openrouter-tts': actual.DEFAULT_TTS_VOICES['openrouter-tts'],
       'openai-tts': 'alloy',
       'browser-native-tts': 'default',
     },
@@ -777,6 +781,19 @@ describe('fetchServerProviders — TTS stale selection', () => {
     await store.getState().fetchServerProviders();
 
     expect(store.getState().ttsProviderId).toBe('openai-tts');
+  });
+
+  it('migrates disabled OpenRouter Fish to official Fish without resetting the selected voice', async () => {
+    const store = await getStore();
+    mockServerResponse({ tts: { 'openrouter-tts': {} } });
+    await store.getState().fetchServerProviders();
+    store.getState().setTTSProvider('openrouter-tts');
+    store.setState({ ttsVoice: '74c6aba5cbf94a15bbdc547ffce5cb38' });
+    mockServerResponse({ tts: { 'openrouter-tts': { disabled: true }, 'fish-tts': {} } });
+    await store.getState().fetchServerProviders();
+    expect(store.getState().ttsProviderId).toBe('fish-tts');
+    expect(store.getState().ttsVoice).toBe('74c6aba5cbf94a15bbdc547ffce5cb38');
+    expect(store.getState().ttsProvidersConfig['openrouter-tts'].serverDisabled).toBe(true);
   });
 });
 

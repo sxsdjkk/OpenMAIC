@@ -116,7 +116,48 @@ export function resolveTTSModelForVoice(
     : TTS_PROVIDERS['qwen-tts'].defaultModelId;
 }
 
+// Shared by official Fish and legacy OpenRouter selections; preserve voice IDs.
+const FISH_TTS_VOICES: TTSVoiceInfo[] = [
+  {
+    id: '5d29a99739c14d4ca3e4fe42193105b2',
+    name: '梓轩 Zixuan',
+    language: 'zh-CN',
+    gender: 'male',
+  },
+  {
+    id: '74c6aba5cbf94a15bbdc547ffce5cb38',
+    name: '语彤 Yutong',
+    language: 'zh-CN',
+    gender: 'female',
+  },
+  { id: 'd675c275d1d44e57b4ef3840c5a23209', name: 'Haoran', language: 'zh-CN', gender: 'male' },
+  { id: 'e98fa6cdad6946bf8d9bb8f9cb8c2532', name: 'Bingbing', language: 'zh-CN', gender: 'female' },
+  {
+    id: '1e85fd1e0d3e4cc2b79fbca800e7e3fe',
+    name: '承翰 Chenghan',
+    language: 'zh-TW',
+    gender: 'male',
+  },
+  {
+    id: '91ec588cf8ef443a9c0d5b21d0c1fa36',
+    name: '詩涵 Shihan',
+    language: 'zh-TW',
+    gender: 'female',
+  },
+];
+
 export const TTS_PROVIDERS: Record<BuiltInTTSProviderId, TTSProviderConfig> = {
+  'fish-tts': {
+    id: 'fish-tts',
+    name: 'Fish Audio · Official',
+    requiresApiKey: true,
+    defaultBaseUrl: 'https://api.fish.audio/v1',
+    models: [{ id: 's2.1-pro-free', name: 'S2.1 Pro Free (paid fallback on quota exhaustion)' }],
+    defaultModelId: 's2.1-pro-free',
+    voices: FISH_TTS_VOICES,
+    supportedFormats: ['mp3'],
+    speedRange: { min: 0.5, max: 2, default: 1 },
+  },
   'openrouter-tts': {
     id: 'openrouter-tts',
     name: 'OpenRouter · Fish Audio Free',
@@ -125,40 +166,7 @@ export const TTS_PROVIDERS: Record<BuiltInTTSProviderId, TTSProviderConfig> = {
     icon: '/logos/openrouter.svg',
     models: [{ id: 'fish-audio/s2.1-pro-free:free', name: 'Fish Audio S2.1 Pro Free' }],
     defaultModelId: 'fish-audio/s2.1-pro-free:free',
-    // Fish Audio official public voices; IDs come from their /m/<id> pages.
-    voices: [
-      {
-        id: '5d29a99739c14d4ca3e4fe42193105b2',
-        name: '梓轩 Zixuan',
-        language: 'zh-CN',
-        gender: 'male',
-      },
-      {
-        id: '74c6aba5cbf94a15bbdc547ffce5cb38',
-        name: '语彤 Yutong',
-        language: 'zh-CN',
-        gender: 'female',
-      },
-      { id: 'd675c275d1d44e57b4ef3840c5a23209', name: 'Haoran', language: 'zh-CN', gender: 'male' },
-      {
-        id: 'e98fa6cdad6946bf8d9bb8f9cb8c2532',
-        name: 'Bingbing',
-        language: 'zh-CN',
-        gender: 'female',
-      },
-      {
-        id: '1e85fd1e0d3e4cc2b79fbca800e7e3fe',
-        name: '承翰 Chenghan',
-        language: 'zh-TW',
-        gender: 'male',
-      },
-      {
-        id: '91ec588cf8ef443a9c0d5b21d0c1fa36',
-        name: '詩涵 Shihan',
-        language: 'zh-TW',
-        gender: 'female',
-      },
-    ],
+    voices: FISH_TTS_VOICES,
     supportedFormats: ['mp3'],
   },
   'openai-tts': {
@@ -1378,6 +1386,7 @@ export const ASR_PROVIDERS: Record<BuiltInASRProviderId, ASRProviderConfig> = {
  * Used when switching providers or testing a non-active provider.
  */
 export const DEFAULT_TTS_VOICES: Record<BuiltInTTSProviderId, string> = {
+  'fish-tts': '5d29a99739c14d4ca3e4fe42193105b2',
   'openrouter-tts': '5d29a99739c14d4ca3e4fe42193105b2',
   'openai-tts': 'alloy',
   'azure-tts': 'zh-CN-XiaoxiaoNeural',
@@ -1392,6 +1401,7 @@ export const DEFAULT_TTS_VOICES: Record<BuiltInTTSProviderId, string> = {
 };
 
 export const DEFAULT_TTS_MODELS: Record<BuiltInTTSProviderId, string> = {
+  'fish-tts': 's2.1-pro-free',
   'openrouter-tts': 'fish-audio/s2.1-pro-free:free',
   'openai-tts': 'gpt-4o-mini-tts',
   'azure-tts': '',

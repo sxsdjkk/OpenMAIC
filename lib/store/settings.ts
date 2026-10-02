@@ -666,6 +666,7 @@ const getDefaultAudioConfig = () => ({
   asrProviderId: 'browser-native' as ASRProviderId,
   asrLanguage: 'zh-CN',
   ttsProvidersConfig: {
+    'fish-tts': { apiKey: '', baseUrl: '', enabled: true },
     'openrouter-tts': { apiKey: '', baseUrl: '', enabled: true },
     // Built-in providers default enabled:true — they only ever surface once
     // configured (API key or server-managed), so "enabled" is a user opt-OUT,
@@ -2072,7 +2073,8 @@ export const useSettingsStore = create<SettingsState>()(
                 : '';
 
               const validTTSVoice =
-                validTTSProvider !== state.ttsProviderId
+                validTTSProvider !== state.ttsProviderId &&
+                !(state.ttsProviderId === 'openrouter-tts' && validTTSProvider === 'fish-tts')
                   ? DEFAULT_TTS_VOICES[validTTSProvider as BuiltInTTSProviderId] || 'default'
                   : state.ttsVoice;
               const validASRLanguage = getValidASRLanguage(

@@ -72,6 +72,15 @@ export async function POST(req: Request) {
 
     // Enforce server precedence: a force-disabled provider is off for everyone,
     // regardless of any client key/selection (#665).
+    // Old classrooms/browser settings retain the OpenRouter Fish provider ID.
+    if (
+      ttsProviderId === 'openrouter-tts' &&
+      isServerTTSProviderDisabled(ttsProviderId) &&
+      isServerConfiguredProvider('tts', 'fish-tts') &&
+      !isServerTTSProviderDisabled('fish-tts')
+    ) {
+      ttsProviderId = 'fish-tts';
+    }
     if (isServerTTSProviderDisabled(ttsProviderId)) {
       return apiError('PROVIDER_DISABLED', 403, 'This TTS provider is disabled by the server');
     }
@@ -150,13 +159,13 @@ export async function POST(req: Request) {
     );
 
     // Generate audio
-    const { audio, format } = await generateTTS(config, text);
+    const { audio, format, modelId } = await generateTTS(config, text);
 
     void recordGenerationUsage({
       kind: 'tts',
       unit: 'character',
       providerId: ttsProviderId,
-      modelId: config.modelId,
+      modelId: modelId || config.modelId,
       quantity: text.length,
     });
 

@@ -23,6 +23,7 @@ const ASR_PROVIDER_NAME_KEYS: Record<string, string> = {
 };
 
 const TTS_PROVIDER_NAME_KEYS: Record<string, string> = {
+  'fish-tts': 'settings.providerFishTTS',
   'openrouter-tts': 'settings.providerOpenRouterTTS',
   'openai-tts': 'settings.providerOpenAITTS',
   'azure-tts': 'settings.providerAzureTTS',

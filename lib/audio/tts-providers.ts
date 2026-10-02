@@ -137,6 +137,7 @@ function ttsFetch(
 export interface TTSGenerationResult {
   audio: Uint8Array;
   format: string;
+  modelId?: string;
 }
 
 /**
@@ -297,6 +298,9 @@ export async function generateTTS(
   const signal = ttsRequestSignal(config.signal);
   try {
     switch (config.providerId) {
+      case 'fish-tts':
+        return await generateFishTTS(config, text, signal);
+
       case 'openrouter-tts':
       case 'openai-tts':
         return await generateOpenAITTS(config, text, signal);
@@ -346,6 +350,67 @@ export async function generateTTS(
     }
     throw error;
   }
+}
+
+/** Ordinary 429/concurrency errors must not silently turn into paid calls. */
+function isFishFreeQuotaExhausted(status: number, error: string): boolean {
+  if (status !== 429 && status !== 402) return false;
+  const message = error.replace(/[_-]/g, ' ');
+  return (
+    /\bfree\b/i.test(message) &&
+    /\b(?:quota|daily\s+limit|usage\s+limit|allowance)\b/i.test(message) &&
+    /\b(?:exceeded|exhausted|reached|depleted)\b/i.test(message) &&
+    !/\b(?:concurrency|concurrent)\b/i.test(message)
+  );
+}
+
+/** Fish's native API uses the model header, reference_id, and prosody.speed. */
+async function generateFishTTS(
+  config: TTSModelConfig,
+  text: string,
+  signal: AbortSignal,
+): Promise<TTSGenerationResult> {
+  let modelId = config.modelId || 's2.1-pro-free';
+  if (modelId !== 's2.1-pro-free' && modelId !== 's2.1-pro') {
+    // Fish defaults unknown models to paid Pro; never rely on that behavior.
+    throw new Error(`Unsupported Fish Audio TTS model: ${modelId}`);
+  }
+  const baseUrl = (config.baseUrl || TTS_PROVIDERS['fish-tts'].defaultBaseUrl!).replace(/\/$/, '');
+  const body = JSON.stringify({
+    text,
+    reference_id: config.voice.startsWith('flux-') ? DEFAULT_TTS_VOICES['fish-tts'] : config.voice,
+    format: 'mp3',
+    prosody: { speed: config.speed ?? 1 },
+  });
+  const request = (model: string) =>
+    ttsFetch(config.publicOnly, `${baseUrl}/tts`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+        model,
+      },
+      body,
+      signal,
+    });
+  let response = await request(modelId);
+  let error = response.ok ? '' : await response.text();
+  if (
+    modelId === 's2.1-pro-free' &&
+    process.env.TTS_FISH_FALLBACK_MODEL === 's2.1-pro' &&
+    isFishFreeQuotaExhausted(response.status, error)
+  ) {
+    signal.throwIfAborted();
+    modelId = 's2.1-pro';
+    log.warn('Fish Audio free quota exhausted; retrying once with paid s2.1-pro');
+    response = await request(modelId);
+    error = response.ok ? '' : await response.text();
+  }
+  if (!response.ok) {
+    throwIfTtsRateLimited('Fish Audio', response.status, response.headers.get('retry-after'));
+    throw new Error(`Fish Audio TTS API error (${response.status}): ${error.slice(0, 300)}`);
+  }
+  return { ...(await validateTTSAudioResponse(response, 'Fish Audio')), modelId };
 }
 
 /**

@@ -1401,6 +1401,7 @@
     "enterCustomBaseUrl": "Enter custom Base URL",
     "browserNativeNote": "Browser Native ASR requires no configuration and is completely free",
     "providerOpenRouterTTS": "OpenRouter · Fish Audio Free",
+    "providerFishTTS": "Fish Audio · Official (free first)",
     "providerOpenAITTS": "OpenAI TTS (gpt-4o-mini-tts)",
     "providerAzureTTS": "Azure TTS",
     "providerGLMTTS": "GLM TTS",
